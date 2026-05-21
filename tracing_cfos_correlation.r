@@ -75,7 +75,7 @@ central_contrasts <- c(
   "CeM_manipulation_during_stress"
 )
 
-min_pairwise_n <- 4
+min_pairwise_n <- 3
 network_abs_r_cutoff <- 0.70
 network_fdr_cutoff <- 0.10
 
@@ -283,6 +283,18 @@ long <- raw_long %>%
   mutate(
     Cell_Count = if_else(is.nan(Cell_Count), NA_real_, Cell_Count),
     Intensity = if_else(is.nan(Intensity), NA_real_, Intensity)
+  ) %>%
+  group_by(SampleID) %>%
+  mutate(
+    total_cell_count_per_animal = sum(Cell_Count, na.rm = TRUE),
+    total_intensity_per_animal = sum(Intensity, na.rm = TRUE),
+    Cell_Count_norm = if_else(total_cell_count_per_animal > 0, Cell_Count / total_cell_count_per_animal, NA_real_),
+    Intensity_norm = if_else(total_intensity_per_animal > 0, Intensity / total_intensity_per_animal, NA_real_)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    Cell_Count_norm = if_else(is.nan(Cell_Count_norm), NA_real_, Cell_Count_norm),
+    Intensity_norm = if_else(is.nan(Intensity_norm), NA_real_, Intensity_norm)
   )
 
 openxlsx::write.xlsx(long, file.path(out_dir, "tables", "merged_long_region_data.xlsx"), overwrite = TRUE)
@@ -294,6 +306,178 @@ animal_counts <- long %>%
   count(Group, Condition, name = "n_animals")
 
 openxlsx::write.xlsx(animal_counts, file.path(out_dir, "tables", "QC_animal_counts_by_condition.xlsx"), overwrite = TRUE)
+
+animal_level_qc <- long %>%
+  group_by(SampleID, Animal, Sample, Group, Condition) %>%
+  summarise(
+    total_cell_count_per_animal = first(total_cell_count_per_animal),
+    total_intensity_per_animal = first(total_intensity_per_animal),
+    n_regions_detected_cell_count = sum(!is.na(Cell_Count)),
+    n_regions_detected_intensity = sum(!is.na(Intensity)),
+    n_regions_detected_any = n_distinct(Annotation[!is.na(Cell_Count) | !is.na(Intensity)]),
+    missing_cell_count = sum(is.na(Cell_Count)),
+    missing_intensity = sum(is.na(Intensity)),
+    .groups = "drop"
+  )
+
+QC_animal_level_coverage_signal <- long %>%
+  group_by(SampleID, Animal, Condition) %>%
+  summarise(
+    n_regions_detected = n_distinct(RegionKey[!is.na(Cell_Count) | !is.na(Intensity)]),
+    n_regions_total = n_distinct(RegionKey),
+    n_regions_missing = n_regions_total - n_regions_detected,
+    percent_regions_missing = 100 * n_regions_missing / n_regions_total,
+    total_Cell_Count = sum(Cell_Count, na.rm = TRUE),
+    total_Intensity = sum(Intensity, na.rm = TRUE),
+    median_Cell_Count = median(Cell_Count, na.rm = TRUE),
+    median_Intensity = median(Intensity, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    median_Cell_Count = if_else(is.finite(median_Cell_Count), median_Cell_Count, NA_real_),
+    median_Intensity = if_else(is.finite(median_Intensity), median_Intensity, NA_real_)
+  )
+
+region_condition_missingness_qc <- long %>%
+  group_by(Class, Annotation, Abbreviation, RegionLabel, RegionKey, Condition) %>%
+  summarise(
+    Level = {
+      level_values <- Level[!is.na(Level)]
+      if (length(level_values) == 0) NA_integer_ else level_values[[1]]
+    },
+    n_samples_total = n_distinct(SampleID),
+    n_cell_count = n_distinct(SampleID[!is.na(Cell_Count)]),
+    n_intensity = n_distinct(SampleID[!is.na(Intensity)]),
+    missing_cell_count = n_samples_total - n_cell_count,
+    missing_intensity = n_samples_total - n_intensity,
+    pct_missing_cell_count = 100 * missing_cell_count / n_samples_total,
+    pct_missing_intensity = 100 * missing_intensity / n_samples_total,
+    .groups = "drop"
+  )
+
+QC_region_level_availability <- region_condition_missingness_qc %>%
+  select(RegionKey, Annotation, Abbreviation, Class, Level, Condition, n_samples_total, n_cell_count, n_intensity) %>%
+  mutate(n_present_any = pmax(n_cell_count, n_intensity)) %>%
+  select(RegionKey, Annotation, Abbreviation, Class, Level, Condition, n_samples_total, n_present_any) %>%
+  pivot_wider(
+    names_from = Condition,
+    values_from = c(n_samples_total, n_present_any),
+    values_fill = 0
+  ) %>%
+  mutate(
+    n_VEH_paired = n_present_any_VEH_paired,
+    n_VEH_unpaired = n_present_any_VEH_unpaired,
+    n_CNO_paired = n_present_any_CNO_paired,
+    n_CNO_unpaired = n_present_any_CNO_unpaired,
+    missing_VEH_paired = n_samples_total_VEH_paired - n_VEH_paired,
+    missing_VEH_unpaired = n_samples_total_VEH_unpaired - n_VEH_unpaired,
+    missing_CNO_paired = n_samples_total_CNO_paired - n_CNO_paired,
+    missing_CNO_unpaired = n_samples_total_CNO_unpaired - n_CNO_unpaired,
+    total_n_present = n_VEH_paired + n_VEH_unpaired + n_CNO_paired + n_CNO_unpaired,
+    min_n_per_group = pmin(n_VEH_paired, n_VEH_unpaired, n_CNO_paired, n_CNO_unpaired),
+    n_groups_present = (n_VEH_paired > 0) + (n_VEH_unpaired > 0) + (n_CNO_paired > 0) + (n_CNO_unpaired > 0),
+    passes_learning_effect_filter = n_VEH_paired >= 2 & n_VEH_unpaired >= 2,
+    passes_CNO_learning_filter = n_CNO_paired >= 2 & n_VEH_paired >= 2,
+    passes_CNO_stress_filter = n_CNO_unpaired >= 2 & n_VEH_unpaired >= 2,
+    passes_interaction_filter = n_VEH_paired >= 2 & n_VEH_unpaired >= 2 & n_CNO_paired >= 2 & n_CNO_unpaired >= 2,
+    passes_main_display_filter = passes_learning_effect_filter | passes_CNO_learning_filter | passes_CNO_stress_filter | passes_interaction_filter
+  ) %>%
+  select(
+    RegionKey, Annotation, Abbreviation, Class, Level,
+    n_VEH_paired, n_VEH_unpaired, n_CNO_paired, n_CNO_unpaired,
+    missing_VEH_paired, missing_VEH_unpaired, missing_CNO_paired, missing_CNO_unpaired,
+    total_n_present, min_n_per_group, n_groups_present,
+    passes_learning_effect_filter, passes_CNO_learning_filter, passes_CNO_stress_filter,
+    passes_interaction_filter, passes_main_display_filter
+  )
+
+minimum_n_filter_qc <- region_condition_missingness_qc %>%
+  transmute(
+    Class, Annotation, Abbreviation, Level, RegionLabel, RegionKey, Condition,
+    n_cell_count, n_intensity,
+    Cell_Count_pass_min_n = n_cell_count >= 2,
+    Intensity_pass_min_n = n_intensity >= 2
+  )
+
+openxlsx::write.xlsx(
+  list(
+    animal_counts = animal_counts,
+    animal_level_qc = animal_level_qc,
+    animal_coverage_signal = QC_animal_level_coverage_signal,
+    region_condition_missingness = region_condition_missingness_qc,
+    region_level_availability = QC_region_level_availability,
+    minimum_n_filter = minimum_n_filter_qc
+  ),
+  file.path(out_dir, "tables", "animal_region_qc_tables.xlsx"),
+  overwrite = TRUE
+)
+readr::write_csv(QC_animal_level_coverage_signal, file.path(out_dir, "tables", "QC_animal_level_coverage_signal.csv"))
+readr::write_csv(QC_region_level_availability, file.path(out_dir, "tables", "QC_region_level_availability.csv"))
+
+qc_condition_plot_labels <- c(
+  VEH_paired = "VEH-L",
+  VEH_unpaired = "VEH-S",
+  CNO_paired = "CNO-L",
+  CNO_unpaired = "CNO-S"
+)
+
+qc_condition_colors <- c(
+  VEH_paired = "#111111",
+  VEH_unpaired = "#4C956C",
+  CNO_paired = "#3B6EA8",
+  CNO_unpaired = "#C44E52"
+)
+
+save_qc_figure <- function(plot, filename_base, width, height, dpi = 600) {
+  ggsave(file.path(out_dir, "figures", paste0(filename_base, ".pdf")), plot, width = width, height = height)
+  ggsave(file.path(out_dir, "figures", paste0(filename_base, ".png")), plot, width = width, height = height, dpi = dpi, bg = "white")
+}
+
+qc_plot_animal_metric <- function(data, y_col, title, y_label, filename_base) {
+  y_sym <- sym(y_col)
+  p <- data %>%
+    mutate(Condition = factor(as.character(Condition), levels = names(qc_condition_plot_labels))) %>%
+    ggplot(aes(x = Condition, y = !!y_sym, fill = Condition)) +
+    geom_point(shape = 21, size = 2.2, colour = "grey20", stroke = 0.2,
+               position = position_jitter(width = 0.08, height = 0, seed = 1), alpha = 0.85) +
+    stat_summary(fun = mean, geom = "point", shape = 23, size = 2.5, fill = "white", colour = "grey20") +
+    scale_x_discrete(labels = qc_condition_plot_labels, drop = FALSE) +
+    scale_fill_manual(values = qc_condition_colors, guide = "none", drop = FALSE) +
+    theme_classic(base_size = 8) +
+    labs(title = title, x = NULL, y = y_label)
+
+  save_qc_figure(p, filename_base, width = 4.5, height = 3.5)
+}
+
+qc_plot_animal_metric(QC_animal_level_coverage_signal, "n_regions_detected", "Detected regions per animal", "Regions detected", "QC_detected_regions_per_animal")
+qc_plot_animal_metric(QC_animal_level_coverage_signal, "total_Cell_Count", "Total cFos+ cell count per animal", "Total Cell_Count", "QC_total_cell_count_per_animal")
+qc_plot_animal_metric(QC_animal_level_coverage_signal, "total_Intensity", "Total projection intensity per animal", "Total Intensity", "QC_total_intensity_per_animal")
+
+animal_region_missingness <- long %>%
+  mutate(
+    missing_any = is.na(Cell_Count) & is.na(Intensity),
+    SampleLabel = paste(SampleID, as.character(Condition), sep = " | ")
+  ) %>%
+  select(SampleID, SampleLabel, Condition, RegionKey, missing_any) %>%
+  distinct() %>%
+  left_join(long %>% distinct(RegionKey, Annotation), by = "RegionKey") %>%
+  mutate(
+    SampleLabel = factor(SampleLabel, levels = unique(SampleLabel[order(Condition, SampleID)])),
+    RegionShort = str_trunc(coalesce(Annotation, RegionKey), 18)
+  )
+
+qc_missing_plot <- ggplot(animal_region_missingness, aes(x = RegionShort, y = SampleLabel, fill = missing_any)) +
+  geom_tile(colour = NA) +
+  scale_fill_manual(values = c(`FALSE` = "grey15", `TRUE` = "grey88"), name = "Missing") +
+  theme_classic(base_size = 6) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.text.y = element_text(size = 4.8),
+    legend.position = "bottom"
+  ) +
+  labs(title = "Animal x region missingness", x = "Regions", y = NULL)
+save_qc_figure(qc_missing_plot, "QC_animal_region_missingness_heatmap", width = 9, height = 5)
 
 # -----------------------------
 # 4. QC tables
@@ -490,10 +674,113 @@ make_sample_matrix <- function(data, metric, class_filter = NULL, complete_regio
   list(mat = as.matrix(mat_numeric), annotation = sample_anno)
 }
 
+prune_regions_by_pairwise_overlap <- function(data, metric, region_keys,
+                                              min_pairwise_n = 3,
+                                              conditions = nature_condition_levels) {
+  metric_sym <- rlang::sym(metric)
+
+  current_regions <- region_keys
+  dropped <- tibble()
+
+  repeat {
+    if (length(current_regions) < 2) break
+
+    pair_qc <- purrr::map_dfr(conditions, function(cond) {
+      wide <- data %>%
+        filter(Condition == cond, RegionKey %in% current_regions) %>%
+        select(SampleID, RegionKey, RawValue = !!metric_sym) %>%
+        mutate(Value = safe_log1p(RawValue)) %>%
+        group_by(SampleID, RegionKey) %>%
+        summarise(Value = mean(Value, na.rm = TRUE), .groups = "drop") %>%
+        mutate(Value = if_else(is.nan(Value), NA_real_, Value)) %>%
+        pivot_wider(names_from = RegionKey, values_from = Value)
+
+      mat <- wide %>%
+        select(any_of(current_regions)) %>%
+        as.matrix()
+
+      missing_cols <- setdiff(current_regions, colnames(mat))
+      if (length(missing_cols) > 0) {
+        mat <- cbind(
+          mat,
+          matrix(
+            NA_real_,
+            nrow = nrow(mat),
+            ncol = length(missing_cols),
+            dimnames = list(NULL, missing_cols)
+          )
+        )
+      }
+
+      mat <- mat[, current_regions, drop = FALSE]
+
+      expand.grid(
+        Region1 = current_regions,
+        Region2 = current_regions,
+        stringsAsFactors = FALSE
+      ) %>%
+        as_tibble() %>%
+        filter(Region1 < Region2) %>%
+        rowwise() %>%
+        mutate(
+          Condition = cond,
+          n_pair = sum(is.finite(mat[, Region1]) & is.finite(mat[, Region2])),
+          var1_ok = sd(mat[, Region1], na.rm = TRUE) > 0,
+          var2_ok = sd(mat[, Region2], na.rm = TRUE) > 0,
+          pair_ok = n_pair >= min_pairwise_n & var1_ok & var2_ok
+        ) %>%
+        ungroup()
+    })
+
+    failing_pairs <- pair_qc %>% filter(!pair_ok)
+
+    if (nrow(failing_pairs) == 0) {
+      return(list(
+        kept_regions = current_regions,
+        dropped_regions = dropped,
+        pair_qc = pair_qc
+      ))
+    }
+
+    region_fail_counts <- failing_pairs %>%
+      select(Condition, Region1, Region2, n_pair, var1_ok, var2_ok) %>%
+      pivot_longer(
+        cols = c(Region1, Region2),
+        names_to = "side",
+        values_to = "RegionKey"
+      ) %>%
+      group_by(RegionKey) %>%
+      summarise(
+        n_failing_pairs = n(),
+        min_n_pair = min(n_pair, na.rm = TRUE),
+        n_zero_variance_flags = sum(!var1_ok | !var2_ok, na.rm = TRUE),
+        .groups = "drop"
+      ) %>%
+      arrange(desc(n_failing_pairs), min_n_pair)
+
+    drop_region <- region_fail_counts$RegionKey[[1]]
+
+    dropped <- bind_rows(
+      dropped,
+      region_fail_counts %>%
+        filter(RegionKey == drop_region) %>%
+        mutate(drop_step = nrow(dropped) + 1)
+    )
+
+    current_regions <- setdiff(current_regions, drop_region)
+  }
+
+  list(
+    kept_regions = current_regions,
+    dropped_regions = dropped,
+    pair_qc = tibble()
+  )
+}
+
 # -----------------------------
 # 6. Group heatmaps, sample heatmaps, correlations, networks
 # -----------------------------
-cor_with_p <- function(mat, min_n = 4) {
+cor_with_p <- function(mat, min_n = 3) {
   regions <- colnames(mat)
 
   expand.grid(region1 = regions, region2 = regions, stringsAsFactors = FALSE) %>%
@@ -648,92 +935,193 @@ run_limma_region_contrasts <- function(data, metric) {
   metric_sym <- sym(metric)
 
   df <- data %>%
-    select(SampleID, Condition, Class, Annotation, Abbreviation, RegionLabel, RegionKey, value = !!metric_sym) %>%
+    select(SampleID, Condition, Class, Annotation, Abbreviation, Level, RegionLabel, RegionKey, value = !!metric_sym) %>%
     mutate(value = safe_log1p(value)) %>%
-    filter(!is.na(value), !is.na(Condition))
+    filter(!is.na(Condition))
 
-  region_results <- df %>%
-    group_by(Class, Annotation, Abbreviation, RegionLabel, RegionKey) %>%
-    group_modify(~ {
-      d <- .x
+  sample_meta <- df %>%
+    distinct(SampleID, Condition) %>%
+    arrange(factor(as.character(Condition), levels = levels(long$Condition)), SampleID) %>%
+    mutate(Condition = factor(as.character(Condition), levels = levels(long$Condition)))
 
-      cond_counts <- table(d$Condition)
-      valid_conds <- names(cond_counts)[cond_counts >= 2]
-      d <- d %>% filter(as.character(Condition) %in% valid_conds)
+  first_present <- function(x) {
+    x <- x[!is.na(x) & x != ""]
+    if (length(x) == 0) NA else x[[1]]
+  }
 
-      if (n_distinct(d$Condition) < 2 || nrow(d) < 4) {
-        return(tibble(
-          contrast = names(contrast_definitions),
-          logFC = NA_real_,
-          AveExpr = NA_real_,
-          t = NA_real_,
-          P.Value = NA_real_,
-          adj.P.Val = NA_real_,
-          B = NA_real_,
-          n_samples = n_distinct(.x$SampleID),
-          note = "insufficient data"
-        ))
-      }
+  region_meta <- df %>%
+    group_by(RegionKey) %>%
+    summarise(
+      Class = first_present(Class),
+      Annotation = first_present(Annotation),
+      Abbreviation = first_present(Abbreviation),
+      Level = {
+        level_values <- Level[!is.na(Level)]
+        if (length(level_values) == 0) NA_integer_ else level_values[[1]]
+      },
+      RegionLabel = first_present(RegionLabel),
+      .groups = "drop"
+    ) %>%
+    arrange(RegionKey)
 
-      d <- d %>% mutate(Condition = droplevels(factor(Condition)))
-      design <- model.matrix(~ 0 + Condition, data = d)
-      colnames(design) <- levels(d$Condition)
+  wide <- df %>%
+    group_by(RegionKey, SampleID) %>%
+    summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
+    mutate(value = if_else(is.nan(value), NA_real_, value)) %>%
+    pivot_wider(names_from = SampleID, values_from = value) %>%
+    right_join(region_meta %>% distinct(RegionKey), by = "RegionKey") %>%
+    arrange(RegionKey)
 
-      y <- matrix(d$value, nrow = 1)
-      colnames(y) <- d$SampleID
-      rownames(y) <- unique(.y$RegionKey)
+  mat <- wide %>%
+    select(all_of(sample_meta$SampleID)) %>%
+    as.matrix()
+  rownames(mat) <- wide$RegionKey
 
-      fit <- limma::lmFit(y, design)
+  n_by_condition <- df %>%
+    filter(!is.na(value)) %>%
+    distinct(RegionKey, SampleID, Condition) %>%
+    count(RegionKey, Condition, name = "n") %>%
+    complete(RegionKey = region_meta$RegionKey, Condition = levels(long$Condition), fill = list(n = 0)) %>%
+    pivot_wider(names_from = Condition, values_from = n, names_prefix = "n_")
 
-      possible_contrasts <- contrast_definitions[
-        vapply(contrast_definitions, function(expr) {
-          all(str_extract_all(expr, "[A-Za-z]+_[A-Za-z]+")[[1]] %in% colnames(design))
-        }, logical(1))
-      ]
+  n_samples <- rowSums(!is.na(mat))
+  variable_region <- apply(mat, 1, function(x) sum(!is.na(x)) >= 4 && sd(x, na.rm = TRUE) > 0)
 
-      if (length(possible_contrasts) == 0) {
-        return(tibble(
-          contrast = names(contrast_definitions),
-          logFC = NA_real_,
-          AveExpr = NA_real_,
-          t = NA_real_,
-          P.Value = NA_real_,
-          adj.P.Val = NA_real_,
-          B = NA_real_,
-          n_samples = n_distinct(d$SampleID),
-          note = "no possible contrast"
-        ))
-      }
+  result_template <- tidyr::expand_grid(
+    RegionKey = region_meta$RegionKey,
+    contrast = names(contrast_definitions)
+  ) %>%
+    left_join(region_meta, by = "RegionKey") %>%
+    left_join(n_by_condition, by = "RegionKey") %>%
+    mutate(
+      logFC = NA_real_,
+      AveExpr = NA_real_,
+      t = NA_real_,
+      P.Value = NA_real_,
+      adj.P.Val = NA_real_,
+      B = NA_real_,
+      n_samples = n_samples[RegionKey],
+      note = if_else(variable_region[RegionKey], NA_character_, "insufficient non-missing or non-variable data")
+    )
 
-      cm <- limma::makeContrasts(contrasts = possible_contrasts, levels = design)
-      fit2 <- limma::contrasts.fit(fit, cm)
-      fit2 <- limma::eBayes(fit2)
+  if (sum(variable_region) < 2 || n_distinct(sample_meta$Condition) < 2) {
+    return(
+      result_template %>%
+        group_by(contrast) %>%
+        mutate(adj.P.Val.global = p.adjust(P.Value, method = "BH")) %>%
+        ungroup() %>%
+        arrange(contrast, adj.P.Val.global, P.Value)
+    )
+  }
 
-      purrr::map_dfr(colnames(cm), function(co) {
-        limma::topTable(fit2, coef = co, number = Inf, sort.by = "none") %>%
-          rownames_to_column("region_tmp") %>%
-          as_tibble() %>%
-          mutate(
-            contrast = co,
-            n_samples = n_distinct(d$SampleID),
-            note = NA_character_
-          ) %>%
-          select(contrast, logFC, AveExpr, t, P.Value, adj.P.Val, B, n_samples, note)
-      })
-    }) %>%
-    ungroup() %>%
+  mat_fit <- mat[variable_region, , drop = FALSE]
+  for (j in seq_len(ncol(mat_fit))) {
+    missing_rows <- is.na(mat_fit[, j])
+    if (any(missing_rows)) {
+      row_medians <- apply(mat_fit[missing_rows, , drop = FALSE], 1, median, na.rm = TRUE)
+      mat_fit[missing_rows, j] <- row_medians
+    }
+  }
+
+  design <- model.matrix(~ 0 + Condition, data = sample_meta)
+  colnames(design) <- str_remove(colnames(design), "^Condition")
+
+  possible_contrasts <- contrast_definitions[
+    vapply(contrast_definitions, function(expr) {
+      all(str_extract_all(expr, "[A-Za-z]+_[A-Za-z]+")[[1]] %in% colnames(design))
+    }, logical(1))
+  ]
+
+  if (length(possible_contrasts) == 0) {
+    return(
+      result_template %>%
+        mutate(note = coalesce(note, "no possible contrast")) %>%
+        group_by(contrast) %>%
+        mutate(adj.P.Val.global = p.adjust(P.Value, method = "BH")) %>%
+        ungroup() %>%
+        arrange(contrast, adj.P.Val.global, P.Value)
+    )
+  }
+
+  fit <- limma::lmFit(mat_fit, design)
+  cm <- limma::makeContrasts(contrasts = possible_contrasts, levels = design)
+  fit2 <- limma::contrasts.fit(fit, cm)
+  fit2 <- limma::eBayes(fit2)
+
+  fitted_results <- purrr::map_dfr(colnames(cm), function(co) {
+    limma::topTable(fit2, coef = co, number = Inf, sort.by = "none") %>%
+      rownames_to_column("RegionKey") %>%
+      as_tibble() %>%
+      mutate(contrast = co, note = NA_character_) %>%
+      select(RegionKey, contrast, logFC, AveExpr, t, P.Value, adj.P.Val, B, note)
+  })
+
+  result_template %>%
+    select(-logFC, -AveExpr, -t, -P.Value, -adj.P.Val, -B, -note) %>%
+    left_join(fitted_results, by = c("RegionKey", "contrast")) %>%
+    mutate(
+      n_samples = n_samples[RegionKey],
+      note = case_when(
+        !variable_region[RegionKey] ~ "insufficient non-missing or non-variable data",
+        contrast %in% names(possible_contrasts) ~ note,
+        TRUE ~ "contrast not estimated"
+      )
+    ) %>%
     group_by(contrast) %>%
     mutate(adj.P.Val.global = p.adjust(P.Value, method = "BH")) %>%
     ungroup() %>%
     arrange(contrast, adj.P.Val.global, P.Value)
-
-  region_results
 }
 
 contrast_tables <- list()
 for (metric in metrics_to_analyse) {
   contrast_tables[[metric]] <- run_limma_region_contrasts(long, metric)
 }
+
+normalized_metrics_to_analyse <- c("Cell_Count_norm", "Intensity_norm")
+normalized_metric_lookup <- c(Cell_Count_norm = "Cell_Count", Intensity_norm = "Intensity")
+
+contrast_tables_normalized <- list()
+for (metric in normalized_metrics_to_analyse) {
+  contrast_tables_normalized[[metric]] <- run_limma_region_contrasts(long, metric)
+}
+
+normalization_comparison <- purrr::imap_dfr(normalized_metric_lookup, function(raw_metric, norm_metric) {
+  raw_res <- contrast_tables[[raw_metric]] %>%
+    filter(contrast %in% central_contrasts, !is.na(logFC)) %>%
+    group_by(contrast) %>%
+    arrange(desc(abs(logFC)), P.Value, .by_group = TRUE) %>%
+    mutate(raw_abs_effect_rank = row_number()) %>%
+    ungroup() %>%
+    select(RegionKey, contrast, raw_logFC = logFC, raw_P.Value = P.Value, raw_adj.P.Val.global = adj.P.Val.global, raw_abs_effect_rank)
+
+  norm_res <- contrast_tables_normalized[[norm_metric]] %>%
+    filter(contrast %in% central_contrasts, !is.na(logFC)) %>%
+    group_by(contrast) %>%
+    arrange(desc(abs(logFC)), P.Value, .by_group = TRUE) %>%
+    mutate(norm_abs_effect_rank = row_number()) %>%
+    ungroup() %>%
+    select(RegionKey, contrast, norm_logFC = logFC, norm_P.Value = P.Value, norm_adj.P.Val.global = adj.P.Val.global, norm_abs_effect_rank)
+
+  full_join(raw_res, norm_res, by = c("RegionKey", "contrast")) %>%
+    mutate(
+      Metric = raw_metric,
+      NormalizedMetric = norm_metric,
+      rank_shift = norm_abs_effect_rank - raw_abs_effect_rank,
+      same_direction = sign(raw_logFC) == sign(norm_logFC)
+    ) %>%
+    left_join(long %>% distinct(RegionKey, Class, Annotation, Abbreviation, RegionLabel), by = "RegionKey") %>%
+    select(Metric, NormalizedMetric, contrast, Class, Annotation, Abbreviation, RegionLabel, RegionKey,
+           raw_logFC, norm_logFC, same_direction, raw_abs_effect_rank, norm_abs_effect_rank, rank_shift,
+           raw_P.Value, norm_P.Value, raw_adj.P.Val.global, norm_adj.P.Val.global)
+})
+
+readr::write_csv(normalization_comparison, file.path(out_dir, "tables", "normalization_comparison_raw_vs_normalized_log1p.csv"))
+openxlsx::write.xlsx(
+  c(contrast_tables_normalized, list(normalization_comparison = normalization_comparison)),
+  file.path(out_dir, "tables", "region_group_contrasts_limma_normalized_log1p.xlsx"),
+  overwrite = TRUE
+)
 
 interpret_region_effects <- function(res, metric, top_n_per_contrast = 25) {
   metric_label <- case_when(
@@ -1655,44 +2043,126 @@ make_network_feature_matrix <- function(data, region_keys, metric) {
     arrange(NetworkCondition, SampleID)
 }
 
-build_condition_network <- function(mat, abs_r_cutoff = 0.60, min_complete_n = 4) {
+build_condition_network <- function(mat,
+                                    abs_r_cutoff = 0.60,
+                                    min_complete_n = 4,
+                                    p_cutoff = 0.05,
+                                    fdr_cutoff = 0.10,
+                                    edge_rule = c("nominal_p", "fdr", "effect_size_only")) {
+  edge_rule <- match.arg(edge_rule)
   features <- colnames(mat)
-  if (nrow(mat) < min_complete_n || length(features) < 3) {
-    return(list(edges = tibble(), metrics = tibble(), hubs = tibble(), graph = igraph::make_empty_graph()))
-  }
 
-  cor_mat <- suppressWarnings(cor(mat, method = "spearman", use = "pairwise.complete.obs"))
-  cor_mat[!is.finite(cor_mat)] <- NA_real_
-  diag(cor_mat) <- NA_real_
+  if (nrow(mat) < min_complete_n || length(features) < 3) {
+    return(list(
+      edges = tibble(),
+      metrics = tibble(),
+      hubs = tibble(),
+      graph = igraph::make_empty_graph()
+    ))
+  }
 
   edges <- combn(features, 2, simplify = FALSE) %>%
     purrr::map_dfr(function(pair) {
       x <- mat[, pair[1]]
       y <- mat[, pair[2]]
-      n_pair <- sum(complete.cases(x, y))
-      r <- cor_mat[pair[1], pair[2]]
+
+      keep <- is.finite(x) & is.finite(y)
+      n_pair <- sum(keep)
+
+      x_ok <- n_pair >= min_complete_n && stats::sd(x[keep], na.rm = TRUE) > 0
+      y_ok <- n_pair >= min_complete_n && stats::sd(y[keep], na.rm = TRUE) > 0
+      edge_eligible <- x_ok && y_ok
+
+      if (edge_eligible) {
+        test <- suppressWarnings(
+          tryCatch(
+            stats::cor.test(
+              x[keep],
+              y[keep],
+              method = "spearman",
+              exact = FALSE
+            ),
+            error = function(e) NULL
+          )
+        )
+
+        r <- if (is.null(test)) NA_real_ else unname(test$estimate)
+        p_value <- if (is.null(test)) NA_real_ else test$p.value
+      } else {
+        r <- NA_real_
+        p_value <- NA_real_
+      }
+
       tibble(
         feature1 = pair[1],
         feature2 = pair[2],
         n_pair = n_pair,
+        edge_eligible = edge_eligible,
         r = r,
+        p_value = p_value,
         abs_r = abs(r),
-        sign = case_when(r > 0 ~ "positive", r < 0 ~ "negative", TRUE ~ NA_character_),
-        edge_present = !is.na(r) & n_pair >= min_complete_n & abs(r) >= abs_r_cutoff
+        sign = case_when(
+          r > 0 ~ "positive",
+          r < 0 ~ "negative",
+          TRUE ~ NA_character_
+        )
       )
-    })
+    }) %>%
+    mutate(
+      fdr = p.adjust(p_value, method = "BH"),
+      edge_effect_size = edge_eligible & !is.na(r) & abs_r >= abs_r_cutoff,
+      edge_nominal = edge_effect_size & !is.na(p_value) & p_value <= p_cutoff,
+      edge_fdr = edge_effect_size & !is.na(fdr) & fdr <= fdr_cutoff,
+      edge_present = case_when(
+        edge_rule == "effect_size_only" ~ edge_effect_size,
+        edge_rule == "nominal_p" ~ edge_nominal,
+        edge_rule == "fdr" ~ edge_fdr,
+        TRUE ~ FALSE
+      ),
+      edge_rule_used = case_when(
+        edge_rule == "effect_size_only" ~ paste0("|rho| >= ", abs_r_cutoff, ", n_pair >= ", min_complete_n),
+        edge_rule == "nominal_p" ~ paste0("|rho| >= ", abs_r_cutoff, ", P <= ", p_cutoff, ", n_pair >= ", min_complete_n),
+        edge_rule == "fdr" ~ paste0("|rho| >= ", abs_r_cutoff, ", FDR <= ", fdr_cutoff, ", n_pair >= ", min_complete_n)
+      )
+    )
 
   present_edges <- edges %>%
     filter(edge_present) %>%
-    transmute(from = feature1, to = feature2, r, abs_r, sign, n_pair, weight = abs_r)
+    transmute(
+      from = feature1,
+      to = feature2,
+      r,
+      p_value,
+      fdr,
+      abs_r,
+      sign,
+      n_pair,
+      edge_eligible,
+      edge_effect_size,
+      edge_nominal,
+      edge_fdr,
+      weight = abs_r
+    )
 
-  graph <- igraph::graph_from_data_frame(present_edges, directed = FALSE, vertices = tibble(name = features))
+  graph <- igraph::graph_from_data_frame(
+    present_edges,
+    directed = FALSE,
+    vertices = tibble(name = features)
+  )
+
   graph_density <- igraph::edge_density(graph, loops = FALSE)
-  mean_abs_r <- if (nrow(present_edges) > 0) mean(present_edges$abs_r, na.rm = TRUE) else NA_real_
+
+  mean_abs_r <- if (nrow(present_edges) > 0) {
+    mean(present_edges$abs_r, na.rm = TRUE)
+  } else {
+    NA_real_
+  }
 
   modularity_value <- NA_real_
   if (igraph::ecount(graph) > 0 && igraph::vcount(graph) > 2) {
-    community <- suppressWarnings(igraph::cluster_louvain(graph, weights = igraph::E(graph)$weight))
+    community <- suppressWarnings(
+      igraph::cluster_louvain(graph, weights = igraph::E(graph)$weight)
+    )
     modularity_value <- igraph::modularity(community)
   }
 
@@ -1701,9 +2171,14 @@ build_condition_network <- function(mat, abs_r_cutoff = 0.60, min_complete_n = 4
     n_features = length(features),
     n_edges = igraph::ecount(graph),
     possible_edges = length(features) * (length(features) - 1) / 2,
+    n_eligible_edges = sum(edges$edge_eligible, na.rm = TRUE),
+    n_effect_size_edges = sum(edges$edge_effect_size, na.rm = TRUE),
+    n_nominal_edges = sum(edges$edge_nominal, na.rm = TRUE),
+    n_fdr_edges = sum(edges$edge_fdr, na.rm = TRUE),
     density = graph_density,
     mean_abs_r = mean_abs_r,
-    modularity = modularity_value
+    modularity = modularity_value,
+    edge_rule = unique(edges$edge_rule_used)[1]
   )
 
   hubs <- tibble(
@@ -1711,7 +2186,11 @@ build_condition_network <- function(mat, abs_r_cutoff = 0.60, min_complete_n = 4
     degree = igraph::degree(graph, v = features),
     strength = igraph::strength(graph, v = features, weights = igraph::E(graph)$weight),
     betweenness = igraph::betweenness(graph, v = features, directed = FALSE, weights = NA),
-    eigen_centrality = igraph::eigen_centrality(graph, directed = FALSE, weights = igraph::E(graph)$weight)$vector[features]
+    eigen_centrality = igraph::eigen_centrality(
+      graph,
+      directed = FALSE,
+      weights = igraph::E(graph)$weight
+    )$vector[features]
   ) %>%
     mutate(
       Metric = str_extract(Feature, "^[^_]+(?:_[^_]+)?"),
@@ -1723,13 +2202,62 @@ build_condition_network <- function(mat, abs_r_cutoff = 0.60, min_complete_n = 4
 
 compare_network_edges <- function(edge_tables, reference_condition = "VEH_paired") {
   d <- edge_tables %>%
-    select(NetworkCondition, feature1, feature2, r, abs_r, sign, edge_present) %>%
-    mutate(edge_id = paste(pmin(feature1, feature2), pmax(feature1, feature2), sep = " -- ")) %>%
-    select(NetworkCondition, edge_id, r, abs_r, sign, edge_present) %>%
+    select(
+      NetworkCondition,
+      feature1,
+      feature2,
+      r,
+      p_value,
+      fdr,
+      abs_r,
+      sign,
+      n_pair,
+      edge_eligible,
+      edge_effect_size,
+      edge_nominal,
+      edge_fdr,
+      edge_present
+    ) %>%
+    mutate(
+      edge_id = paste(pmin(feature1, feature2), pmax(feature1, feature2), sep = " -- ")
+    ) %>%
+    select(
+      NetworkCondition,
+      edge_id,
+      r,
+      p_value,
+      fdr,
+      abs_r,
+      sign,
+      n_pair,
+      edge_eligible,
+      edge_effect_size,
+      edge_nominal,
+      edge_fdr,
+      edge_present
+    ) %>%
     pivot_wider(
       names_from = NetworkCondition,
-      values_from = c(r, abs_r, sign, edge_present),
-      values_fill = list(edge_present = FALSE)
+      values_from = c(
+        r,
+        p_value,
+        fdr,
+        abs_r,
+        sign,
+        n_pair,
+        edge_eligible,
+        edge_effect_size,
+        edge_nominal,
+        edge_fdr,
+        edge_present
+      ),
+      values_fill = list(
+        edge_eligible = FALSE,
+        edge_effect_size = FALSE,
+        edge_nominal = FALSE,
+        edge_fdr = FALSE,
+        edge_present = FALSE
+      )
     )
 
   compare_conditions <- setdiff(nature_condition_levels, reference_condition)
@@ -1737,18 +2265,42 @@ compare_network_edges <- function(edge_tables, reference_condition = "VEH_paired
   for (cond in compare_conditions) {
     ref_present <- paste0("edge_present_", reference_condition)
     cond_present <- paste0("edge_present_", cond)
+
+    ref_eligible <- paste0("edge_eligible_", reference_condition)
+    cond_eligible <- paste0("edge_eligible_", cond)
+
     ref_sign <- paste0("sign_", reference_condition)
     cond_sign <- paste0("sign_", cond)
+
     ref_abs <- paste0("abs_r_", reference_condition)
     cond_abs <- paste0("abs_r_", cond)
+
+    ref_n <- paste0("n_pair_", reference_condition)
+    cond_n <- paste0("n_pair_", cond)
+
     rewiring_col <- paste0("rewiring_", cond, "_vs_", reference_condition)
+    comparable_col <- paste0("comparable_", cond, "_vs_", reference_condition)
     delta_col <- paste0("delta_abs_r_", cond, "_vs_", reference_condition)
 
+    if (!ref_present %in% names(d)) d[[ref_present]] <- FALSE
     if (!cond_present %in% names(d)) d[[cond_present]] <- FALSE
+
+    if (!ref_eligible %in% names(d)) d[[ref_eligible]] <- FALSE
+    if (!cond_eligible %in% names(d)) d[[cond_eligible]] <- FALSE
+
+    if (!ref_sign %in% names(d)) d[[ref_sign]] <- NA_character_
     if (!cond_sign %in% names(d)) d[[cond_sign]] <- NA_character_
+
+    if (!ref_abs %in% names(d)) d[[ref_abs]] <- NA_real_
     if (!cond_abs %in% names(d)) d[[cond_abs]] <- NA_real_
 
+    if (!ref_n %in% names(d)) d[[ref_n]] <- NA_integer_
+    if (!cond_n %in% names(d)) d[[cond_n]] <- NA_integer_
+
+    d[[comparable_col]] <- d[[ref_eligible]] & d[[cond_eligible]]
+
     d[[rewiring_col]] <- case_when(
+      !d[[comparable_col]] ~ "not comparable",
       d[[ref_present]] & !d[[cond_present]] ~ "lost",
       !d[[ref_present]] & d[[cond_present]] ~ "gained",
       d[[ref_present]] & d[[cond_present]] & d[[ref_sign]] != d[[cond_sign]] ~ "sign switch",
@@ -1756,7 +2308,11 @@ compare_network_edges <- function(edge_tables, reference_condition = "VEH_paired
       TRUE ~ "absent"
     )
 
-    d[[delta_col]] <- d[[cond_abs]] - d[[ref_abs]]
+    d[[delta_col]] <- if_else(
+      d[[comparable_col]],
+      d[[cond_abs]] - d[[ref_abs]],
+      NA_real_
+    )
   }
 
   d
@@ -1794,7 +2350,12 @@ format_network_edge_label <- function(edge_id) {
   )
 }
 
-make_network_rewiring_figure <- function(data, region_top_n = 14, abs_r_cutoff = 0.60) {
+make_network_rewiring_figure <- function(data,
+                                         region_top_n = 14,
+                                         abs_r_cutoff = 0.60,
+                                         edge_rule = c("nominal_p", "effect_size_only", "fdr")) {
+  edge_rule <- match.arg(edge_rule)
+  edge_rule_suffix <- paste0("_", edge_rule)
   region_keys <- make_network_region_set(top_n = region_top_n)
   if (length(region_keys) < 4) {
     write_main_warning("main_figure_network_warning.txt", "Network analysis skipped: fewer than 4 interpretable regions selected.")
@@ -1832,7 +2393,14 @@ make_network_rewiring_figure <- function(data, region_top_n = 14, abs_r_cutoff =
     network_results <- purrr::map(network_levels, function(cond) {
       ids <- meta %>% filter(NetworkCondition == cond) %>% pull(SampleID)
       mat <- mat_all[rownames(mat_all) %in% ids, , drop = FALSE]
-      build_condition_network(mat, abs_r_cutoff = abs_r_cutoff, min_complete_n = min_pairwise_n)
+      build_condition_network(
+        mat,
+        abs_r_cutoff = abs_r_cutoff,
+        min_complete_n = min_pairwise_n,
+        p_cutoff = 0.05,
+        fdr_cutoff = 0.10,
+        edge_rule = edge_rule
+      )
     })
     names(network_results) <- network_levels
 
@@ -1869,16 +2437,19 @@ make_network_rewiring_figure <- function(data, region_top_n = 14, abs_r_cutoff =
     mutate(hub_rank = dense_rank(desc(strength))) %>%
     ungroup()
 
-  readr::write_csv(metrics, file.path(main_tab_dir, "main_figure_network_metrics_by_metric.csv"))
-  readr::write_csv(hubs, file.path(main_tab_dir, "main_figure_network_hub_centrality_by_metric.csv"))
-  readr::write_csv(edges, file.path(main_tab_dir, "main_figure_network_edges_by_metric.csv"))
-  readr::write_csv(edge_rewiring, file.path(main_tab_dir, "main_figure_network_edge_rewiring_by_metric.csv"))
+  readr::write_csv(
+  metrics,
+  file.path(main_tab_dir, paste0("main_figure_network_metrics_by_metric", edge_rule_suffix, ".csv"))
+  )
+  readr::write_csv(hubs, file.path(main_tab_dir, paste0("main_figure_network_hub_centrality_by_metric", edge_rule_suffix, ".csv")))
+  readr::write_csv(edges, file.path(main_tab_dir, paste0("main_figure_network_edges_by_metric", edge_rule_suffix, ".csv")))
+  readr::write_csv(edge_rewiring, file.path(main_tab_dir, paste0("main_figure_network_edge_rewiring_by_metric", edge_rule_suffix, ".csv")))
 
   # Backward-compatible copies now contain the separated, metric-labelled analyses.
-  readr::write_csv(metrics, file.path(main_tab_dir, "main_figure_network_metrics.csv"))
-  readr::write_csv(hubs, file.path(main_tab_dir, "main_figure_network_hub_centrality.csv"))
-  readr::write_csv(edges, file.path(main_tab_dir, "main_figure_network_edges.csv"))
-  readr::write_csv(edge_rewiring, file.path(main_tab_dir, "main_figure_network_edge_rewiring.csv"))
+  readr::write_csv(metrics, file.path(main_tab_dir, paste0("main_figure_network_metrics", edge_rule_suffix, ".csv")))
+  readr::write_csv(hubs, file.path(main_tab_dir, paste0("main_figure_network_hub_centrality", edge_rule_suffix, ".csv")))
+  readr::write_csv(edges, file.path(main_tab_dir, paste0("main_figure_network_edges", edge_rule_suffix, ".csv")))
+  readr::write_csv(edge_rewiring, file.path(main_tab_dir, paste0("main_figure_network_edge_rewiring", edge_rule_suffix, ".csv")))
 
   metric_plot <- metrics %>%
     select(NetworkMetric, NetworkCondition, density, modularity, mean_abs_r) %>%
@@ -1947,7 +2518,7 @@ make_network_rewiring_figure <- function(data, region_top_n = 14, abs_r_cutoff =
     pivot_longer(cols = all_of(rewiring_columns), names_to = "Comparison", values_to = "Class") %>%
     group_by(NetworkMetric, Comparison, Class) %>%
     summarise(n = n(), .groups = "drop") %>%
-    filter(Class != "absent") %>%
+    filter(!Class %in% c("absent", "not comparable")) %>%
     mutate(
       Comparison = str_remove(Comparison, "^rewiring_"),
       Comparison = str_replace(Comparison, "_vs_VEH_paired$", ""),
@@ -1965,7 +2536,7 @@ make_network_rewiring_figure <- function(data, region_top_n = 14, abs_r_cutoff =
       axis.text.x = element_text(angle = 35, hjust = 1, size = 5.7),
       strip.text = element_text(size = 6.1, face = "bold")
     ) +
-    labs(title = "Edge rewiring vs VEH_paired", x = NULL, y = "Edges")
+    labs(title = "Comparable covariance pairs vs VEH_paired", x = NULL, y = "Region pairs")
 
   delta_columns <- grep("^delta_abs_r_.*_vs_VEH_paired$", names(edge_rewiring), value = TRUE)
   edge_ranked <- edge_rewiring %>%
@@ -2012,12 +2583,12 @@ make_network_rewiring_figure <- function(data, region_top_n = 14, abs_r_cutoff =
         axis.text.x = element_text(angle = 35, hjust = 1, size = 5.6),
         axis.text.y = element_text(size = 5.4)
       ) +
-      labs(title = "Top rewired edges, separated by signal type", x = NULL, y = NULL)
+      labs(title = "Top changing covariance pairs", x = NULL, y = NULL)
   } else {
     edge_plot <- ggplot() +
       annotate("text", x = 0, y = 0, label = "No thresholded edge rewiring detected", size = 2.3) +
       theme_void(base_size = 7.5) +
-      labs(title = "Top rewired edges")
+      labs(title = "Top changing covariance pairs")
   }
 
   network_plot <- (metric_plot / hub_plot / rewiring_plot / edge_plot) +
@@ -2026,14 +2597,14 @@ make_network_rewiring_figure <- function(data, region_top_n = 14, abs_r_cutoff =
     theme(plot.tag = element_text(face = "bold", size = 9), legend.position = "bottom")
 
   safe_main_ggsave(
-    file.path(main_fig_dir, "main_figure_network_rewiring_separate_cell_count_intensity.pdf"),
+    file.path(main_fig_dir, "main_figure_network_rewiring_separate_cell_count_intensity", edge_rule_suffix, ".pdf"),
     network_plot,
     width = 180 / 25.4,
     height = 285 / 25.4,
     units = "in"
   )
   safe_main_ggsave(
-    file.path(main_fig_dir, "main_figure_network_rewiring_separate_cell_count_intensity.svg"),
+    file.path(main_fig_dir, "main_figure_network_rewiring_separate_cell_count_intensity", edge_rule_suffix, ".svg"),
     network_plot,
     width = 180 / 25.4,
     height = 285 / 25.4,
@@ -2041,7 +2612,7 @@ make_network_rewiring_figure <- function(data, region_top_n = 14, abs_r_cutoff =
     device = svglite::svglite
   )
   safe_main_ggsave(
-    file.path(main_fig_dir, "main_figure_network_rewiring_separate_cell_count_intensity.png"),
+    file.path(main_fig_dir, "main_figure_network_rewiring_separate_cell_count_intensity", edge_rule_suffix, ".png"),
     network_plot,
     width = 180 / 25.4,
     height = 285 / 25.4,
@@ -2105,7 +2676,26 @@ if (is.null(cem_candidate)) {
 panel_d <- make_activity_projection_scatter()
 panel_e <- make_learning_stress_heatmap(top_n = 12)
 panel_f <- make_main_pca(long)
-panel_network <- make_network_rewiring_figure(long, region_top_n = 14, abs_r_cutoff = 0.60)
+panel_network <- make_network_rewiring_figure(
+  long,
+  region_top_n = 14,
+  abs_r_cutoff = 0.60,
+  edge_rule = "nominal_p"
+)
+
+panel_network_effect_size_only <- make_network_rewiring_figure(
+  long,
+  region_top_n = 14,
+  abs_r_cutoff = 0.60,
+  edge_rule = "effect_size_only"
+)
+
+panel_network_fdr <- make_network_rewiring_figure(
+  long,
+  region_top_n = 14,
+  abs_r_cutoff = 0.60,
+  edge_rule = "fdr"
+)
 
 main_panels <- list(panel_a, panel_b, panel_c, panel_d, panel_e, panel_f)
 main_panels <- main_panels[!vapply(main_panels, is.null, logical(1))]
@@ -2154,12 +2744,43 @@ if (length(main_panels) >= 1) {
 }
 
 # -----------------------------
-# 15. Manuscript-matched Fig. 4 panels
+# 15. Manuscript-ready Fig. 4 and supplementary exploratory outputs
 # -----------------------------
 fig4_fig_dir <- file.path(out_dir, "figures", "fig4_manuscript_matched")
 fig4_tab_dir <- file.path(out_dir, "tables", "fig4_manuscript_matched")
+fig4_supp_fig_dir <- file.path(out_dir, "figures", "fig4_supplementary_exploratory")
+fig4_supp_tab_dir <- file.path(out_dir, "tables", "fig4_supplementary_exploratory")
 dir.create(fig4_fig_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(fig4_tab_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(fig4_supp_fig_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(fig4_supp_tab_dir, recursive = TRUE, showWarnings = FALSE)
+
+fig4_deprecated_main_bases <- c(
+  "fig4_main_manuscript_matched_combined",
+  "fig4_main_learning_stress_activity_projection",
+  "fig4F_seed_based_cfos_covariation",
+  "fig4G_network_rewiring_summary"
+)
+fig4_deprecated_main_files <- as.vector(outer(fig4_deprecated_main_bases, c("svg", "pdf", "png"), paste, sep = "."))
+invisible(file.remove(file.path(fig4_fig_dir, fig4_deprecated_main_files[file.exists(file.path(fig4_fig_dir, fig4_deprecated_main_files))])))
+
+fig4_deprecated_table_bases <- c(
+  "fig4BC_effect_map_source",
+  "fig4BC_region_condition_availability",
+  "fig4D_key_region_condition_profiles_source",
+  "fig4D_key_region_condition_profiles_summary",
+  "fig4D_key_region_condition_profiles_availability",
+  "fig4E_activity_projection_dissociation_source",
+  "fig4F_seed_based_cfos_covariation_source",
+  "fig4F_seed_based_cfos_covariation_warnings",
+  "fig4F_seed_region_matching",
+  "fig4G_network_rewiring_edges_source",
+  "fig4G_network_rewiring_summary",
+  "fig4_region_prior_matching",
+  "fig4_region_prior_match_display_decisions"
+)
+fig4_deprecated_table_files <- as.vector(outer(fig4_deprecated_table_bases, c("csv", "xlsx"), paste, sep = "."))
+invisible(file.remove(file.path(fig4_tab_dir, fig4_deprecated_table_files[file.exists(file.path(fig4_tab_dir, fig4_deprecated_table_files))])))
 
 fig4_main_contrasts <- c(
   "Learning_effect",
@@ -2167,45 +2788,56 @@ fig4_main_contrasts <- c(
   "CeM_manipulation_during_stress",
   "Learning_x_CeM_interaction"
 )
-
+fig4_contrast_labels <- c(
+  Learning_effect = "Learning",
+  CeM_manipulation_during_learning = "CNO-learning",
+  CeM_manipulation_during_stress = "CNO-stress",
+  Learning_x_CeM_interaction = "Interaction"
+)
+fig4_condition_labels_short <- c(
+  VEH_paired = "VEH-L",
+  VEH_unpaired = "VEH-S",
+  CNO_paired = "CNO-L",
+  CNO_unpaired = "CNO-S"
+)
+fig4_condition_labels <- c(
+  VEH_paired = "VEH paired",
+  VEH_unpaired = "VEH unpaired",
+  CNO_paired = "CNO paired",
+  CNO_unpaired = "CNO unpaired"
+)
+fig4_prior_terms <- c(
+  "ECT", "LA", "PVi", "PVH", "AV", "SS", "RSP", "AVP", "GU",
+  "CeM", "PVa", "MEPO", "VMPO", "DMH", "STN", "SFO", "RCH",
+  "SO", "PeF", "TRS", "GPe", "PALd", "GPi", "CEAl", "SF"
+)
+fig4_max_heatmap_regions <- 20
+fig4_profile_region_n <- 3
+fig4_min_profile_n_per_condition <- 2
 fig4_cov_abs_r_cutoff <- 0.70
 fig4_cov_fdr_cutoff <- 0.10
-fig4_cov_min_n_pair <- 5
-fig4_max_heatmap_regions <- 28
-fig4_min_estimable_contrasts_total <- 2
-fig4_profile_region_n <- 8
-fig4_condition_labels <- c(
-  VEH_paired = "VEH_paired",
-  VEH_unpaired = "VEH_unpaired",
-  CNO_paired = "CNO_paired",
-  CNO_unpaired = "CNO_unpaired"
-)
-fig4_contrast_labels <- c(
-  Learning_effect = "VEH_paired -\nVEH_unpaired",
-  CeM_manipulation_during_learning = "CNO_paired -\nVEH_paired",
-  CeM_manipulation_during_stress = "CNO_unpaired -\nVEH_unpaired",
-  Learning_x_CeM_interaction = "(CNO_paired - VEH_paired) -\n(CNO_unpaired - VEH_unpaired)"
-)
-
-fig4_condition_colors <- nature_condition_colors
+fig4_cov_min_n_pair <- 3
 fig4_skipped_panels <- character()
 
-fig4_theme <- function(base_size = 7.2) {
+fig4_theme <- function(base_size = 7.0) {
   theme_nature_main(base_size = base_size) +
     theme(
       panel.grid = element_blank(),
       plot.title = element_text(face = "bold", size = base_size + 0.7),
-      plot.subtitle = element_text(size = base_size - 0.3, colour = "grey35"),
-      strip.text = element_text(face = "bold", size = base_size - 0.6),
-      legend.key.height = grid::unit(3.0, "mm"),
-      legend.key.width = grid::unit(3.6, "mm")
+      plot.subtitle = element_text(size = base_size - 0.2, colour = "grey35"),
+      strip.text = element_text(face = "bold", size = base_size - 0.5)
     )
 }
 
-save_fig4_plot <- function(plot, filename_base, width, height, dpi = 600) {
+fig4_note_skip <- function(panel, reason) {
+  fig4_skipped_panels <<- c(fig4_skipped_panels, paste0(panel, ": ", reason))
+  invisible(NULL)
+}
+
+save_fig4_plot <- function(plot, filename_base, width, height, dir = fig4_fig_dir, dpi = 600) {
   if (is.null(plot)) return(invisible(NULL))
   for (ext in c("svg", "pdf", "png")) {
-    filename <- file.path(fig4_fig_dir, paste0(filename_base, ".", ext))
+    filename <- file.path(dir, paste0(filename_base, ".", ext))
     if (ext == "svg") {
       ggsave(filename, plot, width = width, height = height, units = "in", device = svglite::svglite)
     } else if (ext == "png") {
@@ -2217,297 +2849,394 @@ save_fig4_plot <- function(plot, filename_base, width, height, dpi = 600) {
   invisible(plot)
 }
 
-write_fig4_table <- function(x, filename_base) {
-  readr::write_csv(x, file.path(fig4_tab_dir, paste0(filename_base, ".csv")))
-  openxlsx::write.xlsx(x, file.path(fig4_tab_dir, paste0(filename_base, ".xlsx")), overwrite = TRUE)
+write_fig4_table <- function(x, filename_base, dir = fig4_tab_dir) {
+  readr::write_csv(x, file.path(dir, paste0(filename_base, ".csv")))
+  openxlsx::write.xlsx(x, file.path(dir, paste0(filename_base, ".xlsx")), overwrite = TRUE)
   invisible(x)
 }
 
-fig4_note_skip <- function(panel, reason) {
-  fig4_skipped_panels <<- c(fig4_skipped_panels, paste0(panel, ": ", reason))
-  invisible(NULL)
+fig4_short_region <- function(annotation, abbreviation) {
+  label <- coalesce(annotation, abbreviation, "Unknown")
+  label <- if_else(!is.na(annotation) & annotation != "", annotation, label)
+  str_trunc(label, 16)
 }
 
-fig4_clean_region_label <- function(annotation, abbreviation, max_width = 34) {
-  label <- if_else(
-    !is.na(annotation) & annotation != "" & !is.na(abbreviation) & abbreviation != "",
-    paste0(annotation, " (", abbreviation, ")"),
-    coalesce(annotation, abbreviation, "Unknown")
-  )
-  str_trunc(label, max_width)
+fig4_first_present <- function(x) {
+  x <- x[!is.na(x) & x != ""]
+  if (length(x) == 0) NA else x[[1]]
 }
 
 fig4_region_catalog <- long %>%
-  distinct(RegionKey, Class, Annotation, Abbreviation, RegionLabel) %>%
+  group_by(RegionKey) %>%
+  summarise(
+    Annotation = fig4_first_present(Annotation),
+    Abbreviation = fig4_first_present(Abbreviation),
+    Class = fig4_first_present(Class),
+    Level = {
+      level_values <- Level[!is.na(Level)]
+      if (length(level_values) == 0) NA_integer_ else level_values[[1]]
+    },
+    RegionLabel = fig4_first_present(RegionLabel),
+    .groups = "drop"
+  ) %>%
   mutate(
     Annotation_lower = str_to_lower(coalesce(Annotation, "")),
     Abbreviation_lower = str_to_lower(coalesce(Abbreviation, "")),
     RegionLabel_lower = str_to_lower(coalesce(RegionLabel, "")),
-    RegionShort = fig4_clean_region_label(Annotation, Abbreviation)
+    RegionShort = fig4_short_region(Annotation, Abbreviation)
   )
 
-fig4_prior_terms <- c(
-  "ECT", "LA", "PVi", "PVa", "PVH", "AV", "SS", "RSP", "AVP", "GU",
-  "EPv", "GPe", "GPi", "CEAl", "CeM", "PIR", "SF", "MEPO", "MEPA",
-  "PA", "VMPO", "DMH", "RT", "SFO", "STN", "PALd"
-)
+fig4_region_condition_n <- QC_region_level_availability %>%
+  select(
+    RegionKey,
+    n_VEH_paired, n_VEH_unpaired, n_CNO_paired, n_CNO_unpaired,
+    missing_VEH_paired, missing_VEH_unpaired, missing_CNO_paired, missing_CNO_unpaired
+  )
 
-fig4_match_prior_term <- function(term, catalog = fig4_region_catalog) {
-  term_lower <- str_to_lower(term)
-  if (term_lower == "ss") {
-    matched <- catalog %>% filter(str_starts(Annotation_lower, "ss") | str_detect(Abbreviation_lower, "somatosensory"))
-  } else if (term_lower == "cem") {
-    matched <- catalog %>% filter(
-      Annotation_lower %in% c("cem", "ceam") |
-        Abbreviation_lower %in% c("cem", "ceam", "cea-m", "cea m") |
-        str_detect(RegionLabel_lower, "central amygdalar nucleus, medial|central amygdalar nucleus medial")
-    )
-  } else {
-    matched <- catalog %>%
-      filter(
-        Annotation_lower == term_lower |
-          str_starts(Annotation_lower, paste0(term_lower, "-")) |
-          str_starts(Annotation_lower, paste0(term_lower, "_")) |
-          Abbreviation_lower == term_lower |
-          str_detect(Abbreviation_lower, fixed(term_lower))
+fig4_add_contrast_qc <- function(data) {
+  data %>%
+    left_join(fig4_region_condition_n, by = "RegionKey") %>%
+    rowwise() %>%
+    mutate(
+      min_n_per_relevant_group = case_when(
+        contrast == "Learning_effect" ~ min(c(n_VEH_paired, n_VEH_unpaired), na.rm = TRUE),
+        contrast == "CeM_manipulation_during_learning" ~ min(c(n_CNO_paired, n_VEH_paired), na.rm = TRUE),
+        contrast == "CeM_manipulation_during_stress" ~ min(c(n_CNO_unpaired, n_VEH_unpaired), na.rm = TRUE),
+        contrast == "Learning_x_CeM_interaction" ~ min(c(n_VEH_paired, n_VEH_unpaired, n_CNO_paired, n_CNO_unpaired), na.rm = TRUE),
+        TRUE ~ NA_real_
+      ),
+      qc_flag = case_when(
+        is.na(min_n_per_relevant_group) | min_n_per_relevant_group < 2 ~ "excluded_insufficient_n",
+        min_n_per_relevant_group == 2 ~ "low_n_exploratory",
+        min_n_per_relevant_group >= 3 ~ "OK",
+        TRUE ~ "excluded_insufficient_n"
+      ),
+      logFC_main_display = if_else(qc_flag == "excluded_insufficient_n", NA_real_, logFC),
+      missingness_relevant = case_when(
+        contrast == "Learning_effect" ~ paste0("VEH_paired=", missing_VEH_paired, "; VEH_unpaired=", missing_VEH_unpaired),
+        contrast == "CeM_manipulation_during_learning" ~ paste0("CNO_paired=", missing_CNO_paired, "; VEH_paired=", missing_VEH_paired),
+        contrast == "CeM_manipulation_during_stress" ~ paste0("CNO_unpaired=", missing_CNO_unpaired, "; VEH_unpaired=", missing_VEH_unpaired),
+        contrast == "Learning_x_CeM_interaction" ~ paste0("VEH_paired=", missing_VEH_paired, "; VEH_unpaired=", missing_VEH_unpaired, "; CNO_paired=", missing_CNO_paired, "; CNO_unpaired=", missing_CNO_unpaired),
+        TRUE ~ NA_character_
       )
-  }
-
-  if (nrow(matched) == 0) {
-    tibble(
-      prior_term = term,
-      prior_found = FALSE,
-      RegionKey = NA_character_,
-      Class = NA_character_,
-      Annotation = NA_character_,
-      Abbreviation = NA_character_,
-      RegionLabel = NA_character_
-    )
-  } else {
-    matched %>%
-      arrange(Annotation, RegionKey) %>%
-      mutate(prior_term = term, prior_found = TRUE, .before = 1) %>%
-      select(prior_term, prior_found, RegionKey, Class, Annotation, Abbreviation, RegionLabel)
-  }
+    ) %>%
+    ungroup()
 }
 
-fig4_prior_matches <- purrr::map_dfr(fig4_prior_terms, fig4_match_prior_term)
-write_fig4_table(fig4_prior_matches, "fig4_region_prior_matching")
+fig4_sign_key <- tibble::tribble(
+  ~contrast, ~short_label, ~contrast_formula, ~positive_logFC_means,
+  "Learning_effect", "Learning", "VEH_paired - VEH_unpaired", "VEH_paired > VEH_unpaired",
+  "CeM_manipulation_during_learning", "CNO effect during learning", "CNO_paired - VEH_paired", "CNO_paired > VEH_paired",
+  "CeM_manipulation_during_stress", "CNO effect during stress", "CNO_unpaired - VEH_unpaired", "CNO_unpaired > VEH_unpaired",
+  "Learning_x_CeM_interaction", "Interaction", "(CNO_paired - VEH_paired) - (CNO_unpaired - VEH_unpaired)", "CNO effect is stronger / more positive during learning than during stress"
+)
+write_fig4_table(fig4_sign_key, "fig4_contrast_sign_key")
 
-fig4_effect_rank <- purrr::imap_dfr(contrast_tables, function(res, metric) {
+fig4_all_effects <- purrr::imap_dfr(contrast_tables, function(res, metric) {
   res %>%
     filter(contrast %in% fig4_main_contrasts) %>%
     mutate(Metric = metric) %>%
-    select(Metric, contrast, Class, Annotation, Abbreviation, RegionLabel, RegionKey, logFC, P.Value, adj.P.Val.global)
+    select(Metric, contrast, Class, Annotation, Abbreviation, Level, RegionLabel, RegionKey,
+           logFC, AveExpr, t, P.Value, adj.P.Val.global, n_samples, note)
 }) %>%
-  group_by(RegionKey, Class, Annotation, Abbreviation, RegionLabel) %>%
+  fig4_add_contrast_qc()
+write_fig4_table(fig4_all_effects, "fig4_all_region_central_contrast_effects", dir = fig4_supp_tab_dir)
+
+fig4_effect_rank <- fig4_all_effects %>%
+  group_by(RegionKey, Class, Annotation, Abbreviation, Level, RegionLabel) %>%
   summarise(
-    n_estimable_contrasts_total = sum(!is.na(logFC)),
-    n_estimable_cell_count = sum(Metric == "Cell_Count" & !is.na(logFC)),
-    n_estimable_intensity = sum(Metric == "Intensity" & !is.na(logFC)),
-    max_abs_effect = {
-      if (any(!is.na(logFC))) max(abs(logFC), na.rm = TRUE) else NA_real_
-    },
-    min_raw_p = {
-      if (any(!is.na(P.Value))) suppressWarnings(min(P.Value, na.rm = TRUE)) else NA_real_
-    },
+    n_estimable_contrasts_total = sum(qc_flag != "excluded_insufficient_n" & !is.na(logFC)),
+    max_abs_effect = if (any(qc_flag != "excluded_insufficient_n" & !is.na(logFC))) max(abs(logFC[qc_flag != "excluded_insufficient_n"]), na.rm = TRUE) else NA_real_,
+    min_raw_p = if (any(!is.na(P.Value))) min(P.Value, na.rm = TRUE) else NA_real_,
     .groups = "drop"
   ) %>%
-  mutate(
-    max_abs_effect = if_else(is.finite(max_abs_effect), max_abs_effect, NA_real_),
-    min_raw_p = if_else(is.finite(min_raw_p), min_raw_p, NA_real_)
-  ) %>%
-  arrange(desc(n_estimable_contrasts_total), desc(max_abs_effect), min_raw_p)
+  mutate(max_abs_effect = coalesce(max_abs_effect, 0), min_raw_p = coalesce(min_raw_p, Inf))
+
+fig4_match_prior_term <- function(term) {
+  term_lower <- str_to_lower(term)
+  exact <- fig4_region_catalog %>%
+    filter(Annotation_lower == term_lower | Abbreviation_lower == term_lower)
+  broad <- if (term_lower == "ss") {
+    fig4_region_catalog %>% filter(str_starts(Annotation_lower, "ss") | str_detect(Abbreviation_lower, "somatosensory"))
+  } else if (term_lower == "cem") {
+    fig4_region_catalog %>%
+      filter(Annotation_lower %in% c("cem", "ceam") |
+               Abbreviation_lower %in% c("cem", "ceam", "cea-m", "cea m") |
+               str_detect(RegionLabel_lower, "central amygdalar nucleus, medial|central amygdalar nucleus medial"))
+  } else {
+    fig4_region_catalog %>%
+      filter(str_detect(Annotation_lower, fixed(term_lower)) | str_detect(Abbreviation_lower, fixed(term_lower)))
+  }
+  bind_rows(exact %>% mutate(match_type = "exact"), broad %>% mutate(match_type = "broad")) %>%
+    distinct(RegionKey, .keep_all = TRUE) %>%
+    mutate(prior_term = term, prior_found = TRUE, .before = 1)
+}
+
+fig4_prior_matches <- purrr::map_dfr(fig4_prior_terms, fig4_match_prior_term)
+fig4_missing_prior_terms <- setdiff(fig4_prior_terms, unique(fig4_prior_matches$prior_term))
+if (length(fig4_missing_prior_terms) > 0) {
+  fig4_prior_matches <- bind_rows(
+    fig4_prior_matches,
+    tibble(
+      prior_term = fig4_missing_prior_terms,
+      prior_found = FALSE,
+      match_type = NA_character_,
+      RegionKey = NA_character_,
+      Annotation = NA_character_,
+      Abbreviation = NA_character_,
+      Class = NA_character_,
+      Level = NA_integer_,
+      RegionLabel = NA_character_,
+      Annotation_lower = NA_character_,
+      Abbreviation_lower = NA_character_,
+      RegionLabel_lower = NA_character_,
+      RegionShort = NA_character_
+    )
+  )
+}
 
 fig4_prior_representatives <- fig4_prior_matches %>%
   filter(prior_found, !is.na(RegionKey)) %>%
-  left_join(
-    fig4_effect_rank %>%
-      select(RegionKey, n_estimable_contrasts_total, n_estimable_cell_count, n_estimable_intensity, max_abs_effect, min_raw_p),
-    by = "RegionKey"
-  ) %>%
+  left_join(fig4_effect_rank, by = c("RegionKey", "Class", "Annotation", "Abbreviation", "Level", "RegionLabel")) %>%
   mutate(
+    match_rank = if_else(match_type == "exact", 1L, 2L),
     n_estimable_contrasts_total = coalesce(n_estimable_contrasts_total, 0L),
-    max_abs_effect = coalesce(max_abs_effect, 0)
+    max_abs_effect = coalesce(max_abs_effect, 0),
+    min_raw_p = coalesce(min_raw_p, Inf)
   ) %>%
   group_by(prior_term) %>%
-  arrange(desc(n_estimable_contrasts_total), desc(max_abs_effect), RegionKey, .by_group = TRUE) %>%
+  arrange(match_rank, desc(n_estimable_contrasts_total), desc(max_abs_effect), min_raw_p, RegionKey, .by_group = TRUE) %>%
   slice(1) %>%
   ungroup()
 
-fig4_prior_region_keys <- fig4_prior_representatives %>%
-  pull(RegionKey) %>%
-  unique()
-
-fig4_prior_match_display_decisions <- fig4_prior_matches %>%
+fig4_prior_decisions <- fig4_prior_matches %>%
   left_join(
-    fig4_prior_representatives %>%
-      transmute(prior_term, RegionKey, selected_as_representative = TRUE),
+    fig4_prior_representatives %>% transmute(prior_term, RegionKey, selected_representative = TRUE),
     by = c("prior_term", "RegionKey")
   ) %>%
+  left_join(fig4_effect_rank %>% select(RegionKey, n_estimable_contrasts_total, max_abs_effect, min_raw_p), by = "RegionKey") %>%
   mutate(
-    selected_as_representative = coalesce(selected_as_representative, FALSE),
+    selected_representative = coalesce(selected_representative, FALSE),
     display_decision = case_when(
       !prior_found ~ "not found in data",
-      selected_as_representative ~ "plotted representative",
-      TRUE ~ "not plotted; alternative match for same manuscript term"
+      selected_representative ~ "selected representative",
+      TRUE ~ "excluded alternative match"
     )
   )
-write_fig4_table(fig4_prior_match_display_decisions, "fig4_region_prior_match_display_decisions")
+write_fig4_table(fig4_prior_decisions, "fig4_region_selection_documentation")
 
-fig4_ranked_region_keys <- fig4_effect_rank %>%
-  filter(
-    !RegionKey %in% fig4_prior_region_keys,
-    n_estimable_contrasts_total >= fig4_min_estimable_contrasts_total
-  ) %>%
-  slice_head(n = max(fig4_max_heatmap_regions - length(fig4_prior_region_keys), 0)) %>%
+fig4_prior_keys <- fig4_prior_representatives %>%
+  arrange(match_rank, desc(n_estimable_contrasts_total), desc(max_abs_effect), min_raw_p, RegionKey) %>%
+  pull(RegionKey) %>%
+  unique()
+fig4_ranked_keys <- fig4_effect_rank %>%
+  filter(!RegionKey %in% fig4_prior_keys, n_estimable_contrasts_total >= 2) %>%
+  arrange(desc(max_abs_effect), min_raw_p) %>%
+  slice_head(n = max(fig4_max_heatmap_regions - length(fig4_prior_keys), 0)) %>%
   pull(RegionKey)
 
 fig4_region_selection <- bind_rows(
-  tibble(RegionKey = fig4_prior_region_keys, manuscript_prioritized = TRUE),
-  tibble(RegionKey = fig4_ranked_region_keys, manuscript_prioritized = FALSE)
+  tibble(RegionKey = fig4_prior_keys, manuscript_prioritized = TRUE),
+  tibble(RegionKey = fig4_ranked_keys, manuscript_prioritized = FALSE)
 ) %>%
   distinct(RegionKey, .keep_all = TRUE) %>%
-  left_join(fig4_region_catalog, by = "RegionKey") %>%
+  left_join(fig4_region_catalog %>% select(RegionKey, Annotation, Abbreviation, Class, Level, RegionLabel, RegionShort), by = "RegionKey") %>%
+  left_join(fig4_effect_rank %>% select(RegionKey, n_estimable_contrasts_total, max_abs_effect, min_raw_p), by = "RegionKey") %>%
+  filter(n_estimable_contrasts_total > 0) %>%
+  mutate(
+    inclusion_reason = if_else(manuscript_prioritized, "manuscript-prioritized representative", "effect-ranked addition"),
+    RegionShort = make.unique(RegionShort, sep = " "),
+    Class = coalesce(Class, "Unknown")
+  ) %>%
+  arrange(Class, desc(manuscript_prioritized), desc(max_abs_effect), RegionShort) %>%
+  mutate(plot_order = row_number())
+
+fig4_region_ontology_qc <- fig4_region_catalog %>%
+  select(Annotation, Abbreviation, Class, Level, RegionKey, RegionLabel) %>%
   left_join(
-    fig4_effect_rank %>%
-      select(RegionKey, n_estimable_contrasts_total, n_estimable_cell_count, n_estimable_intensity, max_abs_effect, min_raw_p),
+    fig4_prior_decisions %>%
+      filter(prior_found) %>%
+      group_by(RegionKey) %>%
+      summarise(
+        manuscript_prioritized = TRUE,
+        matched_prior_terms = paste(sort(unique(prior_term)), collapse = "; "),
+        .groups = "drop"
+      ),
+    by = "RegionKey"
+  ) %>%
+  left_join(fig4_region_selection %>% select(RegionKey, inclusion_reason), by = "RegionKey") %>%
+  left_join(
+    region_condition_missingness_qc %>%
+      group_by(RegionKey) %>%
+      summarise(
+        n_CNO_paired_cell = n_cell_count[Condition == "CNO_paired"][1],
+        n_VEH_paired_cell = n_cell_count[Condition == "VEH_paired"][1],
+        n_CNO_unpaired_cell = n_cell_count[Condition == "CNO_unpaired"][1],
+        n_VEH_unpaired_cell = n_cell_count[Condition == "VEH_unpaired"][1],
+        n_CNO_paired_intensity = n_intensity[Condition == "CNO_paired"][1],
+        n_VEH_paired_intensity = n_intensity[Condition == "VEH_paired"][1],
+        n_CNO_unpaired_intensity = n_intensity[Condition == "CNO_unpaired"][1],
+        n_VEH_unpaired_intensity = n_intensity[Condition == "VEH_unpaired"][1],
+        mean_missing_cell_count = mean(pct_missing_cell_count, na.rm = TRUE),
+        mean_missing_intensity = mean(pct_missing_intensity, na.rm = TRUE),
+        .groups = "drop"
+      ),
     by = "RegionKey"
   ) %>%
   mutate(
-    effect_ranked = RegionKey %in% fig4_ranked_region_keys,
-    inclusion_reason = case_when(
-      manuscript_prioritized & effect_ranked ~ "manuscript-prioritized; effect-ranked",
-      manuscript_prioritized ~ "manuscript-prioritized",
-      effect_ranked ~ "effect-ranked",
-      TRUE ~ "selected"
-    ),
-    Class = if_else(is.na(Class) | Class == "", "Unknown", Class),
-    RegionShort = fig4_clean_region_label(Annotation, Abbreviation),
-    plot_order = row_number()
-  ) %>%
-  arrange(Class, desc(manuscript_prioritized), desc(max_abs_effect), RegionShort) %>%
-  mutate(
-    RegionShort = make.unique(RegionShort, sep = " "),
-    plot_order = row_number()
+    manuscript_prioritized = coalesce(manuscript_prioritized, FALSE),
+    inclusion_reason = coalesce(inclusion_reason, "not included in main Fig. 4")
   )
+write_fig4_table(fig4_region_ontology_qc, "fig4_region_ontology_qc")
+write_fig4_table(normalization_comparison, "fig4_normalization_comparison")
 
-write_fig4_table(fig4_region_selection, "fig4_region_selection_documentation")
+fig4_region_label_map <- fig4_region_selection %>%
+  select(RegionShort, Annotation, Abbreviation, Class, Level, RegionLabel, RegionKey, manuscript_prioritized, inclusion_reason)
+write_fig4_table(fig4_region_label_map, "fig4_region_abbreviation_key")
 
-fig4_heatmap_source <- purrr::imap_dfr(contrast_tables, function(res, metric) {
-  res %>%
-    filter(contrast %in% fig4_main_contrasts, RegionKey %in% fig4_region_selection$RegionKey) %>%
-    mutate(Metric = metric) %>%
-    select(Metric, contrast, Class, Annotation, Abbreviation, RegionLabel, RegionKey, logFC, P.Value, adj.P.Val.global)
-}) %>%
-  left_join(fig4_region_selection %>% select(RegionKey, RegionShort, inclusion_reason, plot_order), by = "RegionKey") %>%
-  mutate(
-    contrast_estimable = !is.na(logFC),
-    not_estimable_reason = if_else(contrast_estimable, NA_character_, "Contrast not estimable from available non-missing values")
-  )
-
-fig4_metric_availability <- long %>%
+fig4_heatmap_source <- fig4_all_effects %>%
   filter(RegionKey %in% fig4_region_selection$RegionKey) %>%
-  select(SampleID, Condition, RegionKey, all_of(metrics_to_analyse)) %>%
-  pivot_longer(cols = all_of(metrics_to_analyse), names_to = "Metric", values_to = "RawValue") %>%
-  group_by(Metric, RegionKey, Condition) %>%
-  summarise(
-    n_samples_total = n_distinct(SampleID),
-    n_non_missing = n_distinct(SampleID[!is.na(RawValue)]),
-    n_missing = n_samples_total - n_non_missing,
-    pct_missing = 100 * n_missing / n_samples_total,
-    .groups = "drop"
-  ) %>%
-  left_join(fig4_region_selection %>% select(RegionKey, RegionShort, inclusion_reason), by = "RegionKey") %>%
-  mutate(Condition = factor(as.character(Condition), levels = nature_condition_levels)) %>%
-  arrange(Metric, RegionShort, Condition)
+  left_join(fig4_region_selection %>% select(RegionKey, RegionShort, manuscript_prioritized, inclusion_reason, plot_order), by = "RegionKey") %>%
+  mutate(
+    contrast = factor(contrast, levels = fig4_main_contrasts),
+    contrast_estimable = !is.na(logFC),
+    not_estimable_reason = if_else(contrast_estimable, NA_character_, "contrast not estimable from available non-missing values")
+  )
 
-write_fig4_table(fig4_heatmap_source, "fig4BC_effect_map_source")
-write_fig4_table(fig4_metric_availability, "fig4BC_region_condition_availability")
+write_fig4_table(fig4_heatmap_source %>% filter(Metric == "Intensity"), "fig4_panelB_projection_effects")
+write_fig4_table(fig4_heatmap_source %>% filter(Metric == "Cell_Count"), "fig4_panelC_cfos_effects")
 
-make_fig4_effect_heatmap <- function(metric, title_label) {
+fig4_heatmap_limit <- max(abs(fig4_heatmap_source$logFC_main_display), na.rm = TRUE)
+fig4_heatmap_limit <- ifelse(is.finite(fig4_heatmap_limit) && fig4_heatmap_limit > 0, fig4_heatmap_limit, 1)
+
+make_fig4_heatmap <- function(metric, title_label) {
   d <- fig4_heatmap_source %>%
     filter(Metric == metric) %>%
     mutate(
-      contrast = factor(contrast, levels = fig4_main_contrasts),
-      RowLabel = factor(RegionShort, levels = rev(fig4_region_selection$RegionShort))
+      x = as.integer(contrast),
+      y = factor(RegionShort, levels = rev(fig4_region_selection$RegionShort)),
+      prior_x = 0.35
     )
+  if (nrow(d) == 0) return(NULL)
 
-  if (nrow(d) == 0) {
-    fig4_note_skip(paste0("Panel ", if_else(metric == "Intensity", "B", "C")), paste0("No ", metric, " contrast rows available."))
-    return(NULL)
-  }
-
-  max_abs <- max(abs(d$logFC), na.rm = TRUE)
-  max_abs <- ifelse(is.finite(max_abs) && max_abs > 0, max_abs, 1)
-
-  ggplot(d, aes(x = contrast, y = RowLabel, fill = logFC)) +
-    geom_tile(colour = "white", linewidth = 0.18) +
+  ggplot(d, aes(x = x, y = y)) +
+    geom_tile(aes(fill = logFC_main_display), colour = "white", linewidth = 0.18, width = 0.92, height = 0.92) +
+    geom_point(
+      data = d %>% distinct(y, manuscript_prioritized, prior_x) %>% filter(manuscript_prioritized),
+      aes(x = prior_x, y = y),
+      inherit.aes = FALSE,
+      shape = 8, size = 1.25, colour = "grey15", stroke = 0.25
+    ) +
     facet_grid(Class ~ ., scales = "free_y", space = "free_y") +
+    scale_x_continuous(
+      breaks = seq_along(fig4_main_contrasts),
+      labels = fig4_contrast_labels,
+      limits = c(0.1, length(fig4_main_contrasts) + 0.55),
+      expand = expansion(mult = c(0, 0.02))
+    ) +
     scale_fill_gradient2(
       low = "#3B6EA8", mid = "white", high = "#C44E52",
-      midpoint = 0, limits = c(-max_abs, max_abs), oob = scales::squish,
-      name = "logFC",
-      na.value = "grey88"
+      midpoint = 0, limits = c(-fig4_heatmap_limit, fig4_heatmap_limit),
+      oob = scales::squish, na.value = "grey88", name = "logFC"
     ) +
-    scale_x_discrete(
-      labels = fig4_contrast_labels,
-      drop = FALSE
-    ) +
-    fig4_theme(base_size = 6.8) +
+    fig4_theme(base_size = 6.4) +
     theme(
       axis.line = element_blank(),
       axis.ticks = element_blank(),
-      axis.text.x = element_text(angle = 35, hjust = 1, vjust = 1),
-      axis.text.y = element_text(size = 5.6),
-      strip.text.y = element_text(angle = 0, size = 5.7),
+      axis.text.x = element_text(angle = 25, hjust = 1, vjust = 1, size = 5.6),
+      axis.text.y = element_text(size = 6.2),
+      strip.text.y = element_text(angle = 0, size = 5.3),
       legend.position = "right"
     ) +
-    labs(title = title_label, x = NULL, y = NULL)
+    labs(title = title_label, subtitle = "* manuscript-prioritized representative", x = NULL, y = NULL)
 }
 
-fig4B <- make_fig4_effect_heatmap("Intensity", "Projection intensity")
-fig4C <- make_fig4_effect_heatmap("Cell_Count", "cFos+ cell count")
-save_fig4_plot(fig4B, "fig4B_projection_intensity_effect_map", width = 4.8, height = 7.2)
-save_fig4_plot(fig4C, "fig4C_cfos_activity_effect_map", width = 4.8, height = 7.2)
-
-fig4_profile_regions <- fig4_region_selection %>%
-  filter(str_to_lower(Annotation) %in% str_to_lower(c("ECT", "LA", "PVi", "PVa", "PVH", "AV", "SS", "RSP", "GU", "EPv", "GPe", "GPi")) |
-           str_starts(str_to_lower(Annotation), "ss")) %>%
-  arrange(desc(max_abs_effect)) %>%
-  slice_head(n = fig4_profile_region_n)
-
-if (nrow(fig4_profile_regions) < fig4_profile_region_n) {
-  fig4_profile_regions <- bind_rows(
-    fig4_profile_regions,
-    fig4_region_selection %>%
-      filter(!RegionKey %in% fig4_profile_regions$RegionKey) %>%
-      arrange(desc(max_abs_effect)) %>%
-      slice_head(n = fig4_profile_region_n - nrow(fig4_profile_regions))
+fig4A <- {
+  condition_d <- tibble(
+    Condition = factor(names(fig4_condition_labels), levels = nature_condition_levels),
+    Label = fig4_condition_labels[names(fig4_condition_labels)],
+    Meaning = c(
+      "Associative fear learning",
+      "Stress / non-associative exposure",
+      "CeM manipulation during learning",
+      "CeM manipulation during stress"
+    )
   ) %>%
-    distinct(RegionKey, .keep_all = TRUE)
+    mutate(y = rev(row_number()))
+
+  contrast_d <- fig4_sign_key %>%
+    mutate(
+      label = paste0(short_label, ": + means ", positive_logFC_means),
+      y = rev(row_number())
+    )
+
+  ggplot() +
+    geom_point(data = condition_d, aes(x = 0.03, y = y, fill = Condition), shape = 21, size = 2.6, colour = "grey20", stroke = 0.2) +
+    geom_text(data = condition_d, aes(x = 0.08, y = y, label = Label), hjust = 0, size = 2.2, fontface = "bold") +
+    geom_text(data = condition_d, aes(x = 0.29, y = y, label = Meaning), hjust = 0, size = 2.05) +
+    geom_text(data = contrast_d, aes(x = 0.03, y = y - 4.7, label = str_wrap(label, 70)), hjust = 0, size = 2.0, lineheight = 0.9) +
+    scale_fill_manual(values = nature_condition_colors, guide = "none", drop = FALSE) +
+    coord_cartesian(xlim = c(0, 1), ylim = c(-4.2, 4.45), clip = "off") +
+    theme_void(base_size = 7) +
+    labs(
+      title = "Conditions and contrast sign",
+      subtitle = "Insufficient region/group coverage is greyed or excluded; full n and missingness are in QC tables."
+    )
 }
+
+fig4B <- make_fig4_heatmap("Intensity", "Projection intensity")
+fig4C <- make_fig4_heatmap("Cell_Count", "cFos+ cell count")
+
+profile_candidates <- fig4_region_selection %>%
+  mutate(priority_rank = if_else(manuscript_prioritized, 1L, 2L)) %>%
+  arrange(priority_rank, desc(max_abs_effect), min_raw_p)
+
+profile_qc <- long %>%
+  filter(RegionKey %in% profile_candidates$RegionKey) %>%
+  select(SampleID, Condition, RegionKey, Cell_Count, Intensity) %>%
+  pivot_longer(cols = c(Cell_Count, Intensity), names_to = "Metric", values_to = "RawValue") %>%
+  group_by(RegionKey, Metric, Condition) %>%
+  summarise(n_non_missing = n_distinct(SampleID[!is.na(RawValue)]), .groups = "drop") %>%
+  group_by(RegionKey) %>%
+  summarise(
+    min_cell_count_n = min(n_non_missing[Metric == "Cell_Count"], na.rm = TRUE),
+    min_intensity_n = min(n_non_missing[Metric == "Intensity"], na.rm = TRUE),
+    profile_pass_min_n = min(min_cell_count_n, min_intensity_n, na.rm = TRUE) >= fig4_min_profile_n_per_condition,
+    .groups = "drop"
+  ) %>%
+  mutate(across(starts_with("min_"), ~ if_else(is.finite(.x), .x, NA_real_))) %>%
+  left_join(profile_candidates, by = "RegionKey")
+
+fig4_profile_regions <- profile_qc %>%
+  filter(profile_pass_min_n) %>%
+  arrange(if_else(manuscript_prioritized, 1L, 2L), desc(max_abs_effect), min_raw_p) %>%
+  slice_head(n = fig4_profile_region_n)
+write_fig4_table(profile_qc, "fig4_panelD_key_region_profiles_qc")
 
 fig4D_source <- long %>%
   filter(RegionKey %in% fig4_profile_regions$RegionKey) %>%
-  select(SampleID, Animal, Group, Condition, Class, Annotation, Abbreviation, RegionLabel, RegionKey, all_of(metrics_to_analyse)) %>%
-  pivot_longer(cols = all_of(metrics_to_analyse), names_to = "Metric", values_to = "RawValue") %>%
+  select(SampleID, Animal, Group, Condition, Class, Annotation, Abbreviation, RegionLabel, RegionKey, Cell_Count, Intensity) %>%
+  pivot_longer(cols = c(Cell_Count, Intensity), names_to = "Metric", values_to = "RawValue") %>%
   mutate(
     Value = safe_log1p(RawValue),
-    MetricLabel = recode(Metric, Cell_Count = "cFos+ cells", Intensity = "Projection"),
+    MetricLabel = recode(Metric, Cell_Count = "cFos+ cell count", Intensity = "Projection intensity"),
     Condition = factor(as.character(Condition), levels = nature_condition_levels),
-    ConditionLabel = factor(fig4_condition_labels[as.character(Condition)], levels = fig4_condition_labels),
-    RegionShort = fig4_clean_region_label(Annotation, Abbreviation, max_width = 24)
-  )
-
-fig4D_availability <- fig4D_source %>%
-  group_by(Metric, MetricLabel, RegionKey, RegionShort, Condition, ConditionLabel) %>%
-  summarise(
-    n_samples_total = n_distinct(SampleID),
-    n_non_missing = n_distinct(SampleID[!is.na(RawValue)]),
-    n_missing = n_samples_total - n_non_missing,
-    pct_missing = 100 * n_missing / n_samples_total,
-    .groups = "drop"
+    ConditionLabel = factor(fig4_condition_labels_short[as.character(Condition)], levels = fig4_condition_labels_short),
+    RegionShort = fig4_short_region(Annotation, Abbreviation)
+  ) %>%
+  left_join(
+    profile_qc %>%
+      select(RegionKey, min_cell_count_n, min_intensity_n, profile_pass_min_n) %>%
+      mutate(profile_qc_flag = if_else(profile_pass_min_n, "OK", "excluded_insufficient_n")),
+    by = "RegionKey"
+  ) %>%
+  left_join(
+    fig4_region_condition_n,
+    by = "RegionKey"
+  ) %>%
+  mutate(
+    min_n_per_relevant_group = if_else(Metric == "Cell_Count", min_cell_count_n, min_intensity_n),
+    qc_flag = profile_qc_flag
   )
 
 fig4D_summary <- fig4D_source %>%
@@ -2515,50 +3244,31 @@ fig4D_summary <- fig4D_source %>%
   summarise(
     mean_value = mean(Value, na.rm = TRUE),
     n = sum(!is.na(Value)),
-    sem = sd(Value, na.rm = TRUE) / sqrt(n),
-    ci95 = qt(0.975, pmax(n - 1, 1)) * sem,
+    ci95 = qt(0.975, pmax(n - 1, 1)) * sd(Value, na.rm = TRUE) / sqrt(n),
     .groups = "drop"
   ) %>%
-  mutate(
-    sem = if_else(is.finite(sem), sem, 0),
-    ci95 = if_else(is.finite(ci95), ci95, 0),
-    ymin = mean_value - ci95,
-    ymax = mean_value + ci95
-  )
-
-write_fig4_table(fig4D_source, "fig4D_key_region_condition_profiles_source")
-write_fig4_table(fig4D_summary, "fig4D_key_region_condition_profiles_summary")
-write_fig4_table(fig4D_availability, "fig4D_key_region_condition_profiles_availability")
+  mutate(ci95 = if_else(is.finite(ci95), ci95, 0), ymin = mean_value - ci95, ymax = mean_value + ci95)
+write_fig4_table(fig4D_source, "fig4_panelD_key_region_profiles")
+write_fig4_table(fig4D_summary, "fig4_panelD_key_region_profiles_summary")
 
 fig4D <- if (nrow(fig4D_source) > 0) {
   ggplot(fig4D_source, aes(x = ConditionLabel, y = Value)) +
-    geom_point(aes(fill = Condition), shape = 21, size = 1.25, colour = "grey20", stroke = 0.15,
-               alpha = 0.78, position = position_jitter(width = 0.10, height = 0, seed = 1)) +
-    geom_errorbar(
-      data = fig4D_summary,
-      aes(x = ConditionLabel, y = mean_value, ymin = ymin, ymax = ymax, colour = Condition),
-      width = 0.10, linewidth = 0.25, inherit.aes = FALSE
-    ) +
-    geom_point(
-      data = fig4D_summary,
-      aes(y = mean_value, fill = Condition),
-      shape = 23, size = 1.75, colour = "white", stroke = 0.18
-    ) +
+    geom_point(aes(fill = Condition), shape = 21, size = 1.15, colour = "grey20", stroke = 0.15,
+               alpha = 0.8, position = position_jitter(width = 0.08, height = 0, seed = 1)) +
+    geom_errorbar(data = fig4D_summary, aes(x = ConditionLabel, ymin = ymin, ymax = ymax, colour = Condition),
+                  inherit.aes = FALSE, width = 0.08, linewidth = 0.25) +
+    geom_point(data = fig4D_summary, aes(x = ConditionLabel, y = mean_value, fill = Condition),
+               inherit.aes = FALSE, shape = 23, size = 1.6, colour = "white", stroke = 0.18) +
     facet_grid(MetricLabel ~ RegionShort, scales = "free_y") +
-    scale_fill_manual(values = fig4_condition_colors, drop = FALSE) +
-    scale_colour_manual(values = fig4_condition_colors, guide = "none", drop = FALSE) +
-    fig4_theme(base_size = 6.6) +
-    theme(
-      axis.text.x = element_text(angle = 45, hjust = 1, size = 5.3),
-      strip.text.x = element_text(size = 5.6),
-      legend.position = "bottom"
-    ) +
-    labs(title = "Key region condition profiles", x = NULL, y = "log1p signal")
+    scale_fill_manual(values = nature_condition_colors, drop = FALSE) +
+    scale_colour_manual(values = nature_condition_colors, guide = "none", drop = FALSE) +
+    fig4_theme(base_size = 6.0) +
+    theme(axis.text.x = element_text(size = 5.2), legend.position = "none") +
+    labs(title = "Selected regional profiles", subtitle = "L = paired learning; S = unpaired stress", x = NULL, y = "log1p raw signal")
 } else {
-  fig4_note_skip("Panel D", "No key profile regions were available.")
+  fig4_note_skip("Panel D", "No profile regions passed the minimum-n filter.")
   NULL
 }
-save_fig4_plot(fig4D, "fig4D_key_region_condition_profiles", width = 9.0, height = 4.4)
 
 fig4E_source <- full_join(
   contrast_tables$Cell_Count %>%
@@ -2570,329 +3280,692 @@ fig4E_source <- full_join(
     select(RegionKey, Intensity_logFC = logFC, Intensity_P.Value = P.Value, Intensity_adj.P.Val.global = adj.P.Val.global),
   by = "RegionKey"
 ) %>%
-  left_join(fig4_region_selection %>% select(RegionKey, manuscript_prioritized, inclusion_reason), by = "RegionKey") %>%
+  left_join(fig4_region_selection %>% select(RegionKey, manuscript_prioritized), by = "RegionKey") %>%
+  left_join(fig4_region_condition_n, by = "RegionKey") %>%
   mutate(
     manuscript_prioritized = coalesce(manuscript_prioritized, FALSE),
-    combined_abs_effect = sqrt(Cell_Count_logFC^2 + Intensity_logFC^2),
+    min_n_per_relevant_group = pmin(n_VEH_paired, n_VEH_unpaired),
+    qc_flag = case_when(
+      min_n_per_relevant_group < 2 ~ "excluded_insufficient_n",
+      min_n_per_relevant_group == 2 ~ "low_n_exploratory",
+      min_n_per_relevant_group >= 3 ~ "OK",
+      TRUE ~ "excluded_insufficient_n"
+    ),
     plotted = !is.na(Cell_Count_logFC) & !is.na(Intensity_logFC),
     not_plotted_reason = case_when(
       plotted ~ NA_character_,
-      is.na(Cell_Count_logFC) & is.na(Intensity_logFC) ~ "Missing both Cell_Count and Intensity VEH_paired - VEH_unpaired logFC",
-      is.na(Cell_Count_logFC) ~ "Missing Cell_Count VEH_paired - VEH_unpaired logFC",
-      is.na(Intensity_logFC) ~ "Missing Intensity VEH_paired - VEH_unpaired logFC",
+      is.na(Cell_Count_logFC) & is.na(Intensity_logFC) ~ "missing both metrics",
+      is.na(Cell_Count_logFC) ~ "missing regional cFos recruitment effect",
+      is.na(Intensity_logFC) ~ "missing projection intensity effect",
       TRUE ~ NA_character_
     ),
-    RegionShort = fig4_clean_region_label(Annotation, Abbreviation, max_width = 24),
-    label = if_else(
-      plotted & (manuscript_prioritized | rank(-combined_abs_effect, ties.method = "first", na.last = "keep") <= 12),
-      RegionShort,
-      NA_character_
+    combined_abs_effect = sqrt(Cell_Count_logFC^2 + Intensity_logFC^2),
+    RegionShort = fig4_short_region(Annotation, Abbreviation),
+    label = if_else(plotted & qc_flag != "excluded_insufficient_n" & (manuscript_prioritized | rank(-combined_abs_effect, ties.method = "first", na.last = "keep") <= 5), RegionShort, NA_character_),
+    quadrant = case_when(
+      !plotted | abs(Cell_Count_logFC) < 0.05 | abs(Intensity_logFC) < 0.05 ~ "mixed or near-zero",
+      Cell_Count_logFC > 0 & Intensity_logFC > 0 ~ "coupled increase",
+      Cell_Count_logFC > 0 & Intensity_logFC < 0 ~ "cFos-only increase",
+      Cell_Count_logFC < 0 & Intensity_logFC > 0 ~ "projection-only increase",
+      Cell_Count_logFC < 0 & Intensity_logFC < 0 ~ "coupled decrease / reduced signal",
+      TRUE ~ NA_character_
     )
   )
+write_fig4_table(fig4E_source, "fig4_panelE_activity_projection_scatter")
 
-write_fig4_table(fig4E_source, "fig4E_activity_projection_dissociation_source")
+fig4E_qc <- fig4E_source %>%
+  summarise(
+    n_regions_total = n(),
+    n_regions_with_both_metrics = sum(plotted, na.rm = TRUE),
+    n_missing_cell_count_effect = sum(is.na(Cell_Count_logFC)),
+    n_missing_intensity_effect = sum(is.na(Intensity_logFC))
+  )
+write_fig4_table(fig4E_qc, "fig4_panelE_activity_projection_matching_qc")
 
-fig4E <- if (sum(complete.cases(fig4E_source$Cell_Count_logFC, fig4E_source$Intensity_logFC)) >= 3) {
-  ggplot(fig4E_source %>% filter(plotted), aes(x = Cell_Count_logFC, y = Intensity_logFC)) +
+fig4E <- if (sum(fig4E_source$plotted, na.rm = TRUE) >= 3) {
+  ggplot(fig4E_source %>% filter(plotted, qc_flag != "excluded_insufficient_n"), aes(x = Cell_Count_logFC, y = Intensity_logFC)) +
     geom_hline(yintercept = 0, linewidth = 0.25, colour = "grey55") +
     geom_vline(xintercept = 0, linewidth = 0.25, colour = "grey55") +
-    geom_point(aes(size = combined_abs_effect, fill = manuscript_prioritized),
-               shape = 21, colour = "grey15", stroke = 0.18, alpha = 0.84) +
-    ggrepel::geom_text_repel(
-      data = fig4E_source %>% filter(!is.na(label)),
-      aes(label = label),
-      size = 1.9, min.segment.length = 0, segment.size = 0.16,
-      max.overlaps = Inf, seed = 4
-    ) +
-    scale_fill_manual(values = c(`FALSE` = "grey72", `TRUE` = "#C44E52"), name = "Prior", labels = c("No", "Yes")) +
-    scale_size_continuous(range = c(0.8, 3.4), guide = "none") +
-    fig4_theme(base_size = 7.0) +
+    geom_point(aes(fill = manuscript_prioritized, size = combined_abs_effect), shape = 21, colour = "grey15", stroke = 0.18, alpha = 0.85) +
+    ggrepel::geom_text_repel(data = fig4E_source %>% filter(!is.na(label)), aes(label = label),
+                             size = 1.9, segment.size = 0.16, min.segment.length = 0, max.overlaps = 18, force = 1.8, seed = 4) +
+    scale_fill_manual(values = c(`FALSE` = "grey72", `TRUE` = "#C44E52"), name = "Prior") +
+    scale_size_continuous(range = c(0.7, 3.2), guide = "none") +
+    fig4_theme(base_size = 6.8) +
     theme(legend.position = "bottom") +
-    labs(
-      title = "Activity-projection dissociation",
-      x = "VEH_paired - VEH_unpaired logFC, cFos+ cell count",
-      y = "VEH_paired - VEH_unpaired logFC, projection intensity"
-    )
+    labs(title = "Activity-projection dissociation", x = "Learning logFC, cFos+ cell count", y = "Learning logFC, projection intensity")
 } else {
-  fig4_note_skip("Panel E", "Fewer than 3 regions had paired Cell_Count and Intensity VEH_paired - VEH_unpaired effects.")
+  fig4_note_skip("Panel E", "Fewer than 3 regions had matched Cell_Count and Intensity effects.")
   NULL
 }
-save_fig4_plot(fig4E, "fig4E_activity_projection_dissociation", width = 4.7, height = 4.2)
 
-fig4_seed_terms <- c("CEAl", "CeM", "LA", "PVH")
-fig4_seed_candidates <- purrr::map_dfr(fig4_seed_terms, fig4_match_prior_term) %>%
-  filter(prior_found, !is.na(RegionKey)) %>%
-  group_by(prior_term) %>%
-  slice(1) %>%
-  ungroup() %>%
-  mutate(SeedLabel = prior_term)
-write_fig4_table(fig4_seed_candidates, "fig4F_seed_region_matching")
+make_fig4_pca <- function(data) {
+  feature_long <- data %>%
+    filter(RegionKey %in% fig4_region_selection$RegionKey) %>%
+    select(SampleID, Animal, Condition, RegionKey, Cell_Count, Intensity) %>%
+    pivot_longer(cols = c(Cell_Count, Intensity), names_to = "Metric", values_to = "RawValue") %>%
+    mutate(Value = safe_log1p(RawValue), Feature = paste(Metric, RegionKey, sep = "__")) %>%
+    group_by(SampleID, Animal, Condition, Feature) %>%
+    summarise(Value = mean(Value, na.rm = TRUE), .groups = "drop") %>%
+    mutate(Value = if_else(is.nan(Value), NA_real_, Value))
+  wide <- feature_long %>%
+    pivot_wider(names_from = Feature, values_from = Value) %>%
+    arrange(factor(as.character(Condition), levels = nature_condition_levels), SampleID)
+  if (nrow(wide) < 4) return(NULL)
+  meta <- wide %>% select(SampleID, Animal, Condition)
+  mat <- wide %>% select(-SampleID, -Animal, -Condition) %>% as.data.frame()
+  rownames(mat) <- meta$SampleID
+  mat <- as.matrix(mat)
+  keep <- colSums(!is.na(mat)) >= 4 & apply(mat, 2, function(x) sd(x, na.rm = TRUE) > 0)
+  mat <- mat[, keep, drop = FALSE]
+  if (ncol(mat) < 3) return(NULL)
+  for (j in seq_len(ncol(mat))) mat[is.na(mat[, j]), j] <- median(mat[, j], na.rm = TRUE)
+  mat_z <- zscore_cols(mat)
+  pca <- prcomp(mat_z, center = FALSE, scale. = FALSE)
+  var_exp <- 100 * summary(pca)$importance[2, 1:2]
+  pca_df <- as_tibble(pca$x[, 1:2], rownames = "SampleID") %>%
+    left_join(meta, by = "SampleID") %>%
+    mutate(Condition = factor(as.character(Condition), levels = nature_condition_levels), n_features = ncol(mat)) %>%
+    group_by(Condition) %>%
+    mutate(n_animals_condition = n_distinct(SampleID)) %>%
+    ungroup()
+  write_fig4_table(pca_df, "fig4_panelF_pca_coordinates")
+  ggplot(pca_df, aes(x = PC1, y = PC2, fill = Condition)) +
+    geom_point(shape = 21, size = 2.4, colour = "grey15", stroke = 0.22, alpha = 0.9) +
+    scale_fill_manual(values = nature_condition_colors, labels = fig4_condition_labels, drop = FALSE) +
+    fig4_theme(base_size = 6.8) +
+    theme(legend.position = "bottom") +
+    labs(title = "Descriptive animal-level profiles", subtitle = paste0(ncol(mat), " features"), x = paste0("PC1 (", scales::number(var_exp[1], accuracy = 0.1), "%)"), y = paste0("PC2 (", scales::number(var_exp[2], accuracy = 0.1), "%)"))
+}
+fig4F <- make_fig4_pca(long)
+if (is.null(fig4F)) fig4_note_skip("Panel F", "PCA skipped because too few samples or variable features were available.")
 
-fig4_covariation_results <- tibble()
-fig4_covariation_warnings <- tibble(seed = character(), condition = character(), reason = character())
+save_fig4_plot(fig4B, "fig4B_projection_intensity_effect_map", width = 4.6, height = 5.6)
+save_fig4_plot(fig4C, "fig4C_cfos_activity_effect_map", width = 4.6, height = 5.6)
+save_fig4_plot(fig4D, "fig4D_key_region_condition_profiles", width = 8.8, height = 3.8)
+save_fig4_plot(fig4E, "fig4E_activity_projection_dissociation", width = 4.5, height = 4.0)
+save_fig4_plot(fig4F, "fig4F_systems_level_pca", width = 4.2, height = 3.7)
 
-if (nrow(fig4_seed_candidates) > 0) {
-  sm_cell_fig4 <- make_sample_matrix(long, "Cell_Count")
-  mat_cell_fig4 <- safe_log1p(sm_cell_fig4$mat)
-  meta_cell_fig4 <- sm_cell_fig4$annotation %>%
-    mutate(Condition = factor(as.character(Condition), levels = nature_condition_levels))
+fig4_main <- (
+  fig4A /
+    (fig4B | fig4C) /
+    fig4D /
+    (fig4E | fig4F)
+) +
+  patchwork::plot_layout(heights = c(0.55, 1.65, 1.1, 1.05), guides = "collect") +
+  patchwork::plot_annotation(tag_levels = "A") &
+  theme(plot.tag = element_text(face = "bold", size = 9), legend.position = "bottom")
 
-  candidate_targets <- unique(c(fig4_region_selection$RegionKey, colnames(mat_cell_fig4)))
+save_fig4_plot(fig4_main, "fig4_main_learning_stress_activity_projection_final", width = 12.0, height = 12.0)
 
-  fig4_covariation_results <- purrr::pmap_dfr(
-    fig4_seed_candidates %>% select(SeedLabel, SeedRegionKey = RegionKey),
-    function(SeedLabel, SeedRegionKey) {
-      purrr::map_dfr(nature_condition_levels, function(cond) {
-        if (!SeedRegionKey %in% colnames(mat_cell_fig4)) {
-          fig4_covariation_warnings <<- bind_rows(
-            fig4_covariation_warnings,
-            tibble(seed = SeedLabel, condition = cond, reason = "Seed region not present in Cell_Count matrix.")
-          )
-          return(tibble())
-        }
+make_full_effect_heatmap <- function(metric) {
+  d <- fig4_all_effects %>%
+    filter(Metric == metric, !is.na(logFC)) %>%
+    mutate(RegionShort = fig4_short_region(Annotation, Abbreviation), contrast = factor(contrast, levels = fig4_main_contrasts))
+  if (nrow(d) == 0) return(NULL)
+  top_regions <- d %>%
+    group_by(RegionKey, RegionShort) %>%
+    summarise(max_abs = max(abs(logFC), na.rm = TRUE), .groups = "drop") %>%
+    arrange(desc(max_abs)) %>%
+    slice_head(n = 80)
+  d <- d %>% filter(RegionKey %in% top_regions$RegionKey) %>% mutate(RegionShort = factor(RegionShort, levels = rev(top_regions$RegionShort)))
+  lim <- max(abs(d$logFC), na.rm = TRUE)
+  ggplot(d, aes(x = contrast, y = RegionShort, fill = logFC)) +
+    geom_tile(colour = "white", linewidth = 0.12) +
+    scale_fill_gradient2(low = "#3B6EA8", mid = "white", high = "#C44E52", midpoint = 0, limits = c(-lim, lim), oob = scales::squish) +
+    scale_x_discrete(labels = fig4_contrast_labels, drop = FALSE) +
+    fig4_theme(base_size = 5.6) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), axis.text.y = element_text(size = 4.5)) +
+    labs(title = paste0("Supplementary all-region central effects: ", metric), x = NULL, y = NULL)
+}
+save_fig4_plot(make_full_effect_heatmap("Intensity"), "supp_exploratory_projection_all_region_effect_heatmap", width = 7.0, height = 10.0, dir = fig4_supp_fig_dir)
+save_fig4_plot(make_full_effect_heatmap("Cell_Count"), "supp_exploratory_cfos_all_region_effect_heatmap", width = 7.0, height = 10.0, dir = fig4_supp_fig_dir)
 
-        ids <- meta_cell_fig4 %>% filter(Condition == cond) %>% pull(SampleID)
-        submat <- mat_cell_fig4[rownames(mat_cell_fig4) %in% ids, , drop = FALSE]
-        if (nrow(submat) < min_pairwise_n) {
-          fig4_covariation_warnings <<- bind_rows(
-            fig4_covariation_warnings,
-            tibble(seed = SeedLabel, condition = cond, reason = paste0("Fewer than ", min_pairwise_n, " animals."))
-          )
-          return(tibble())
-        }
+fig4_covariance_note <- "Exploratory Spearman covariance across animals; not interpreted as anatomical connectivity, functional connectivity, causality, or rewiring."
 
-        tibble(TargetRegionKey = intersect(candidate_targets, colnames(submat))) %>%
-          filter(TargetRegionKey != SeedRegionKey) %>%
-          rowwise() %>%
-          mutate(
-            SeedLabel = SeedLabel,
-            SeedRegionKey = SeedRegionKey,
-            Condition = cond,
-            n_pair = sum(is.finite(submat[, SeedRegionKey]) & is.finite(submat[, TargetRegionKey])),
-            rho = {
-              if (n_pair >= min_pairwise_n) {
-                suppressWarnings(cor(submat[, SeedRegionKey], submat[, TargetRegionKey], method = "spearman", use = "pairwise.complete.obs"))
-              } else {
-                NA_real_
-              }
-            },
-            p_value = {
-              if (n_pair >= min_pairwise_n && !is.na(rho)) {
-                suppressWarnings(
-                  tryCatch(
-                    cor.test(submat[, SeedRegionKey], submat[, TargetRegionKey], method = "spearman", exact = FALSE)$p.value,
-                    error = function(e) NA_real_
-                  )
-                )
-              } else {
-                NA_real_
-              }
-            }
-          ) %>%
-          ungroup() %>%
-          group_by(SeedLabel, SeedRegionKey, Condition) %>%
-          mutate(fdr = p.adjust(p_value, method = "BH")) %>%
-          ungroup()
-      })
-    }
-  ) %>%
-    left_join(
-      fig4_region_catalog %>%
-        select(TargetRegionKey = RegionKey, TargetClass = Class, TargetAnnotation = Annotation,
-               TargetAbbreviation = Abbreviation, TargetRegionLabel = RegionLabel),
-      by = "TargetRegionKey"
+make_condition_correlation_outputs <- function(metric, value_label, use_normalized = FALSE) {
+  metric_sym <- sym(metric)
+  suffix <- if (use_normalized) paste0(metric, "_normalized") else metric
+
+  min_region_n_all_conditions <- 3
+  min_pairwise_n_covariance <- 3
+  max_covariance_regions <- 20
+
+  candidate_regions <- fig4_region_selection$RegionKey
+
+  label_lookup <- fig4_region_selection %>%
+    distinct(RegionKey, RegionShort) %>%
+    deframe()
+
+  covariance_caption_note <- paste(
+    "Only regions with data from at least",
+    min_region_n_all_conditions,
+    "animals in every condition are shown.",
+    "Remaining grey cells indicate region pairs with fewer than",
+    min_pairwise_n_covariance,
+    "animals with paired measurements in that condition."
+  )
+
+  covariance_region_meta <- long %>%
+    filter(RegionKey %in% candidate_regions) %>%
+    group_by(RegionKey) %>%
+    summarise(
+      Annotation = first(Annotation[!is.na(Annotation)]),
+      Abbreviation = first(Abbreviation[!is.na(Abbreviation)]),
+      Class = first(Class[!is.na(Class)]),
+      Level = {
+        level_values <- Level[!is.na(Level)]
+        if (length(level_values) == 0) NA_integer_ else level_values[[1]]
+      },
+      RegionShort = label_lookup[RegionKey[[1]]],
+      .groups = "drop"
+    )
+
+  covariance_region_coverage <- long %>%
+    filter(RegionKey %in% candidate_regions) %>%
+    select(SampleID, RegionKey, Condition, RawValue = !!metric_sym) %>%
+    group_by(RegionKey, Condition) %>%
+    summarise(
+      n_non_missing = n_distinct(SampleID[!is.na(RawValue)]),
+      .groups = "drop"
     ) %>%
-    left_join(
-      fig4_region_catalog %>%
-        select(SeedRegionKey = RegionKey, SeedClass = Class, SeedAnnotation = Annotation,
-               SeedAbbreviation = Abbreviation, SeedRegionLabel = RegionLabel),
-      by = "SeedRegionKey"
+    complete(
+      RegionKey = candidate_regions,
+      Condition = factor(nature_condition_levels, levels = nature_condition_levels),
+      fill = list(n_non_missing = 0)
     ) %>%
+    pivot_wider(
+      names_from = Condition,
+      values_from = n_non_missing,
+      values_fill = 0,
+      names_prefix = "n_"
+    ) %>%
+    left_join(covariance_region_meta, by = "RegionKey") %>%
     mutate(
-      TargetShort = fig4_clean_region_label(TargetAnnotation, TargetAbbreviation, max_width = 28),
-      SeedCondition = paste(SeedLabel, fig4_condition_labels[Condition], sep = " | "),
-      target_is_fig4_selected = TargetRegionKey %in% fig4_region_selection$RegionKey,
-      covariation_display = n_pair >= fig4_cov_min_n_pair & !is.na(rho),
-      covariation_display_reason = case_when(
-        covariation_display ~ NA_character_,
-        is.na(rho) & n_pair < fig4_cov_min_n_pair ~ paste0("n_pair below display threshold (", fig4_cov_min_n_pair, ")"),
-        is.na(rho) ~ "rho not estimable",
-        n_pair < fig4_cov_min_n_pair ~ paste0("n_pair below display threshold (", fig4_cov_min_n_pair, ")"),
-        TRUE ~ NA_character_
+      min_n_all_conditions = pmin(
+        n_VEH_paired,
+        n_VEH_unpaired,
+        n_CNO_paired,
+        n_CNO_unpaired
+      ),
+      passes_complete_covariance_filter =
+        min_n_all_conditions >= min_region_n_all_conditions,
+      covariance_filter_note = if_else(
+        passes_complete_covariance_filter,
+        "included: n >= 4 in all four conditions",
+        "excluded: fewer than 4 animals in at least one condition"
+      ),
+      covariance_note = fig4_covariance_note
+    ) %>%
+    arrange(
+      desc(passes_complete_covariance_filter),
+      match(RegionKey, candidate_regions)
+    )
+
+  write_fig4_table(
+    covariance_region_coverage,
+    paste0("supp_fig4_covariance_region_coverage_", suffix),
+    dir = fig4_supp_tab_dir
+  )
+
+  selected_regions <- covariance_region_coverage %>%
+    filter(passes_complete_covariance_filter) %>%
+    arrange(match(RegionKey, candidate_regions)) %>%
+    pull(RegionKey)
+
+  pairwise_pruned <- prune_regions_by_pairwise_overlap(
+    data = long,
+    metric = metric,
+    region_keys = selected_regions,
+    min_pairwise_n = min_pairwise_n_covariance,
+    conditions = nature_condition_levels
+  )
+
+  selected_regions <- pairwise_pruned$kept_regions
+
+  write_fig4_table(
+    pairwise_pruned$dropped_regions,
+    paste0("supp_fig4_covariance_pairwise_pruned_regions_", suffix),
+    dir = fig4_supp_tab_dir
+  )
+
+  write_fig4_table(
+    pairwise_pruned$pair_qc,
+    paste0("supp_fig4_covariance_pairwise_qc_", suffix),
+    dir = fig4_supp_tab_dir
+  )
+
+  if (length(selected_regions) > max_covariance_regions) {
+    selected_regions <- selected_regions[seq_len(max_covariance_regions)]
+  }
+
+  if (length(selected_regions) < 3) {
+    fig4_note_skip(
+      paste0("supplementary covariance heatmap ", suffix),
+      paste0(
+        "fewer than 3 regions passed n >= ",
+        min_region_n_all_conditions,
+        " in all four conditions"
       )
     )
-}
+    return(NULL)
+  }
 
-if (!all(c("SeedLabel", "SeedRegionKey", "Condition", "TargetRegionKey", "rho", "p_value", "fdr", "n_pair") %in% names(fig4_covariation_results))) {
-  fig4_note_skip("Panel F", "No CEAl/CeM, LA, or PVH seed regions were available after flexible matching.")
-  fig4_covariation_results <- tibble(
-    SeedLabel = character(),
-    SeedRegionKey = character(),
-    Condition = character(),
-    TargetRegionKey = character(),
-    n_pair = integer(),
-    rho = numeric(),
-    p_value = numeric(),
-    fdr = numeric(),
-    TargetClass = character(),
-    TargetAnnotation = character(),
-    TargetAbbreviation = character(),
-    TargetRegionLabel = character(),
-    SeedClass = character(),
-    SeedAnnotation = character(),
-    SeedAbbreviation = character(),
-    SeedRegionLabel = character(),
-    TargetShort = character(),
-    SeedCondition = character(),
-    target_is_fig4_selected = logical(),
-    covariation_display = logical(),
-    covariation_display_reason = character()
-  )
-}
+  selected_labels <- label_lookup[selected_regions]
 
-write_fig4_table(fig4_covariation_results, "fig4F_seed_based_cfos_covariation_source")
-write_fig4_table(fig4_covariation_warnings, "fig4F_seed_based_cfos_covariation_warnings")
+  covariance_region_selection <- covariance_region_coverage %>%
+    mutate(
+      selected_for_complete_region_covariance = RegionKey %in% selected_regions
+    ) %>%
+    arrange(desc(selected_for_complete_region_covariance), match(RegionKey, candidate_regions))
 
-fig4_cov_targets <- fig4_covariation_results %>%
-  filter(covariation_display) %>%
-  group_by(TargetRegionKey, TargetShort) %>%
-  summarise(
-    target_is_fig4_selected = any(target_is_fig4_selected),
-    max_abs_rho = max(abs(rho), na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  arrange(desc(target_is_fig4_selected), desc(max_abs_rho)) %>%
-  slice_head(n = 35) %>%
-  mutate(TargetPlotShort = make.unique(TargetShort, sep = " "))
-
-fig4F_source_plot <- fig4_covariation_results %>%
-  filter(TargetRegionKey %in% fig4_cov_targets$TargetRegionKey) %>%
-  left_join(fig4_cov_targets %>% select(TargetRegionKey, TargetPlotShort), by = "TargetRegionKey") %>%
-  mutate(
-    rho_display = if_else(covariation_display, rho, NA_real_),
-    TargetPlotShort = factor(TargetPlotShort, levels = rev(fig4_cov_targets$TargetPlotShort)),
-    SeedCondition = factor(SeedCondition, levels = unique(SeedCondition))
+  write_fig4_table(
+    covariance_region_selection,
+    paste0("supp_fig4_covariance_region_selection_", suffix),
+    dir = fig4_supp_tab_dir
   )
 
-fig4F <- if (nrow(fig4F_source_plot) > 0 && n_distinct(fig4F_source_plot$SeedCondition) > 0) {
-  ggplot(fig4F_source_plot, aes(x = SeedCondition, y = TargetPlotShort, fill = rho_display)) +
-    geom_tile(colour = "white", linewidth = 0.16) +
-      scale_fill_gradient2(low = "#3B6EA8", mid = "white", high = "#C44E52",
-                         midpoint = 0, limits = c(-1, 1), oob = scales::squish,
-                         name = "rho", na.value = "grey88") +
-    fig4_theme(base_size = 6.2) +
+  wide <- long %>%
+    filter(RegionKey %in% selected_regions) %>%
+    select(SampleID, Condition, RegionKey, RawValue = !!metric_sym) %>%
+    mutate(Value = safe_log1p(RawValue)) %>%
+    group_by(SampleID, Condition, RegionKey) %>%
+    summarise(Value = mean(Value, na.rm = TRUE), .groups = "drop") %>%
+    mutate(Value = if_else(is.nan(Value), NA_real_, Value)) %>%
+    pivot_wider(names_from = RegionKey, values_from = Value)
+
+  plot_rows <- purrr::map_dfr(nature_condition_levels, function(cond) {
+    d <- wide %>% filter(Condition == cond)
+
+    mat <- d %>%
+      select(any_of(selected_regions)) %>%
+      as.matrix()
+
+    rownames(mat) <- d$SampleID
+
+    missing_cols <- setdiff(selected_regions, colnames(mat))
+    if (length(missing_cols) > 0) {
+      mat <- cbind(
+        mat,
+        matrix(
+          NA_real_,
+          nrow = nrow(mat),
+          ncol = length(missing_cols),
+          dimnames = list(rownames(mat), missing_cols)
+        )
+      )
+    }
+
+    mat <- mat[, selected_regions, drop = FALSE]
+    regs <- selected_regions
+
+    cor_mat <- matrix(
+      NA_real_,
+      nrow = length(regs),
+      ncol = length(regs),
+      dimnames = list(regs, regs)
+    )
+
+    p_mat <- matrix(
+      NA_real_,
+      nrow = length(regs),
+      ncol = length(regs),
+      dimnames = list(regs, regs)
+    )
+
+    npair_mat <- matrix(
+      0L,
+      nrow = length(regs),
+      ncol = length(regs),
+      dimnames = list(regs, regs)
+    )
+
+    for (i in seq_along(regs)) {
+      for (j in seq_along(regs)) {
+        x <- mat[, i]
+        y <- mat[, j]
+        keep_pair <- is.finite(x) & is.finite(y)
+
+        n_pair <- sum(keep_pair)
+        npair_mat[i, j] <- n_pair
+
+        if (
+          n_pair >= min_pairwise_n_covariance &&
+          stats::sd(x[keep_pair], na.rm = TRUE) > 0 &&
+          stats::sd(y[keep_pair], na.rm = TRUE) > 0
+        ) {
+          test <- suppressWarnings(
+            tryCatch(
+              stats::cor.test(
+                x[keep_pair],
+                y[keep_pair],
+                method = "spearman",
+                exact = FALSE
+              ),
+              error = function(e) NULL
+            )
+          )
+
+          if (!is.null(test)) {
+            cor_mat[i, j] <- unname(test$estimate)
+            p_mat[i, j] <- test$p.value
+          }
+        }
+      }
+    }
+
+    diag(cor_mat) <- 1
+    diag(p_mat) <- NA_real_
+
+    cor_out <- as.data.frame(cor_mat) %>%
+      rownames_to_column("RegionKey")
+
+    p_out <- as.data.frame(p_mat) %>%
+      rownames_to_column("RegionKey")
+
+    npair_out <- as.data.frame(npair_mat) %>%
+      rownames_to_column("RegionKey")
+
+    readr::write_csv(
+      cor_out,
+      file.path(
+        fig4_supp_tab_dir,
+        paste0("supp_fig4_condition_correlation_matrix_", suffix, "_", cond, ".csv")
+      )
+    )
+
+    readr::write_csv(
+      p_out,
+      file.path(
+        fig4_supp_tab_dir,
+        paste0("supp_fig4_condition_pvalue_matrix_", suffix, "_", cond, ".csv")
+      )
+    )
+
+    readr::write_csv(
+      npair_out,
+      file.path(
+        fig4_supp_tab_dir,
+        paste0("supp_fig4_condition_npair_matrix_", suffix, "_", cond, ".csv")
+      )
+    )
+
+    cor_long <- as_tibble(cor_mat, rownames = "Region1") %>%
+      pivot_longer(cols = -Region1, names_to = "Region2", values_to = "rho") %>%
+      left_join(
+        as_tibble(npair_mat, rownames = "Region1") %>%
+          pivot_longer(cols = -Region1, names_to = "Region2", values_to = "n_pair"),
+        by = c("Region1", "Region2")
+      ) %>%
+      left_join(
+        as_tibble(p_mat, rownames = "Region1") %>%
+          pivot_longer(cols = -Region1, names_to = "Region2", values_to = "p_value"),
+        by = c("Region1", "Region2")
+      ) %>%
+      left_join(
+        tibble(
+          Region1 = selected_regions,
+          Region1Short = selected_labels[selected_regions]
+        ),
+        by = "Region1"
+      ) %>%
+      left_join(
+        tibble(
+          Region2 = selected_regions,
+          Region2Short = selected_labels[selected_regions]
+        ),
+        by = "Region2"
+      ) %>%
+      mutate(
+        Condition = cond,
+        fdr = p.adjust(
+          if_else(Region1 == Region2, NA_real_, p_value),
+          method = "BH"
+        ),
+        nominal_sig = !is.na(p_value) & p_value < 0.05 & Region1 != Region2,
+        fdr_sig = !is.na(fdr) & fdr < 0.10 & Region1 != Region2,
+        significance_marker = case_when(
+          fdr_sig ~ "FDR < 0.10",
+          nominal_sig ~ "nominal P < 0.05",
+          TRUE ~ "not significant"
+        ),
+        Region1Short = factor(
+          Region1Short,
+          levels = rev(selected_labels[selected_regions])
+        ),
+        Region2Short = factor(
+          Region2Short,
+          levels = selected_labels[selected_regions]
+        ),
+        covariance_qc_flag = case_when(
+          !is.na(rho) ~ "OK",
+          n_pair < min_pairwise_n_covariance ~ "excluded_insufficient_pair_n",
+          TRUE ~ "excluded_nonvariable_or_missing"
+        ),
+        insufficient_pair_note = if_else(
+          n_pair < min_pairwise_n_covariance,
+          paste0(
+            "grey: fewer than ",
+            min_pairwise_n_covariance,
+            " animals with paired measurements"
+          ),
+          NA_character_
+        ),
+        complete_region_filter_note = covariance_caption_note,
+        covariance_note = fig4_covariance_note
+      )
+
+    cor_long
+  })
+
+  write_fig4_table(
+    plot_rows,
+    paste0("supp_fig4_condition_correlation_long_", suffix),
+    dir = fig4_supp_tab_dir
+  )
+
+  p <- ggplot(plot_rows, aes(x = Region2Short, y = Region1Short, fill = rho)) +
+    geom_tile(colour = "white", linewidth = 0.08) +
+    geom_point(
+      data = plot_rows %>%
+        filter(nominal_sig, Region1 != Region2),
+      aes(x = Region2Short, y = Region1Short),
+      inherit.aes = FALSE,
+      shape = 16,
+      size = 0.35,
+      colour = "black"
+    ) +
+    geom_point(
+      data = plot_rows %>%
+        filter(fdr_sig, Region1 != Region2),
+      aes(x = Region2Short, y = Region1Short),
+      inherit.aes = FALSE,
+      shape = 21,
+      size = 0.85,
+      stroke = 0.25,
+      colour = "black",
+      fill = NA
+    ) +
+    facet_wrap(~ Condition, ncol = 2) +
+    scale_fill_gradient2(
+      low = "#3B6EA8",
+      mid = "white",
+      high = "#C44E52",
+      midpoint = 0,
+      limits = c(-1, 1),
+      oob = scales::squish,
+      na.value = "grey88",
+      name = "rho"
+    ) +
+    fig4_theme(base_size = 5.8) +
     theme(
       axis.line = element_blank(),
       axis.ticks = element_blank(),
-      axis.text.x = element_text(angle = 55, hjust = 1, vjust = 1, size = 4.9),
-      axis.text.y = element_text(size = 5.0),
+      axis.text.x = element_text(angle = 60, hjust = 1, size = 4.7),
+      axis.text.y = element_text(size = 4.7),
       legend.position = "right"
     ) +
-    labs(title = "Seed-based cFos covariation", x = NULL, y = NULL)
-} else {
-  fig4_note_skip("Panel F", "No seed-condition covariation results passed the minimum-n requirement.")
-  NULL
-}
-save_fig4_plot(fig4F, "fig4F_seed_based_cfos_covariation", width = 7.4, height = 6.6)
+    labs(
+      title = paste0("Exploratory inter-regional covariance: ", value_label),
+      subtitle = paste0(
+        "Fill = Spearman rho; dot = nominal P < 0.05; open circle = FDR < 0.10. ",
+        "Grey = insufficient paired n or zero variance."
+      ),
+      x = NULL,
+      y = NULL
+    )
 
-fig4G_source <- fig4_covariation_results %>%
-  filter(!is.na(rho), n_pair >= min_pairwise_n) %>%
-  mutate(
-    edge_pass = n_pair >= fig4_cov_min_n_pair & abs(rho) >= fig4_cov_abs_r_cutoff & fdr <= fig4_cov_fdr_cutoff,
-    edge_pass_reason = case_when(
-      edge_pass ~ NA_character_,
-      n_pair < fig4_cov_min_n_pair ~ paste0("n_pair below edge threshold (", fig4_cov_min_n_pair, ")"),
-      abs(rho) < fig4_cov_abs_r_cutoff ~ paste0("abs(rho) below ", fig4_cov_abs_r_cutoff),
-      is.na(fdr) | fdr > fig4_cov_fdr_cutoff ~ paste0("FDR above ", fig4_cov_fdr_cutoff),
-      TRUE ~ NA_character_
-    ),
-    edge_sign = case_when(rho > 0 ~ "Positive", rho < 0 ~ "Negative", TRUE ~ "Zero")
+  save_fig4_plot(
+    p,
+    paste0("supp_fig4_condition_correlation_heatmap_", suffix, "_complete_regions"),
+    width = 8.0,
+    height = 7.0,
+    dir = fig4_supp_fig_dir
   )
 
-fig4G_summary <- fig4G_source %>%
-  filter(edge_pass, edge_sign %in% c("Positive", "Negative")) %>%
-  group_by(SeedLabel, Condition, edge_sign) %>%
+  invisible(plot_rows)
+}
+
+make_condition_correlation_outputs("Cell_Count", "cFos+ cell count")
+make_condition_correlation_outputs("Intensity", "projection intensity")
+
+make_cem_seed_covariance <- function(metric, value_label) {
+  metric_sym <- sym(metric)
+  cem_key <- fig4_prior_decisions %>%
+    filter(prior_term == "CeM", selected_representative, !is.na(RegionKey)) %>%
+    pull(RegionKey) %>%
+    first()
+  if (is.na(cem_key) || length(cem_key) == 0) return(NULL)
+
+  selected_regions <- setdiff(fig4_region_selection$RegionKey, cem_key)
+  wide <- long %>%
+    filter(RegionKey %in% c(cem_key, selected_regions)) %>%
+    select(SampleID, Condition, RegionKey, RawValue = !!metric_sym) %>%
+    mutate(Value = safe_log1p(RawValue)) %>%
+    group_by(SampleID, Condition, RegionKey) %>%
+    summarise(Value = mean(Value, na.rm = TRUE), .groups = "drop") %>%
+    mutate(Value = if_else(is.nan(Value), NA_real_, Value)) %>%
+    pivot_wider(names_from = RegionKey, values_from = Value)
+
+  out <- purrr::map_dfr(nature_condition_levels, function(cond) {
+    d <- wide %>% filter(Condition == cond)
+    if (!cem_key %in% names(d)) return(tibble())
+    purrr::map_dfr(selected_regions[selected_regions %in% names(d)], function(target) {
+      n_pair <- sum(is.finite(d[[cem_key]]) & is.finite(d[[target]]))
+      rho <- if (n_pair >= 3) suppressWarnings(cor(d[[cem_key]], d[[target]], method = "spearman", use = "pairwise.complete.obs")) else NA_real_
+      p_value <- if (n_pair >= 3 && !is.na(rho)) suppressWarnings(tryCatch(cor.test(d[[cem_key]], d[[target]], method = "spearman", exact = FALSE)$p.value, error = function(e) NA_real_)) else NA_real_
+      tibble(
+        Condition = cond,
+        SeedRegionKey = cem_key,
+        TargetRegionKey = target,
+        n_pair = n_pair,
+        rho = rho,
+        p_value = p_value,
+        covariance_qc_flag = case_when(
+          n_pair >= 4 ~ "OK",
+          n_pair == 3 ~ "low_n_exploratory",
+          TRUE ~ "excluded_insufficient_n"
+        )
+      )
+    }) %>%
+      mutate(fdr = p.adjust(p_value, method = "BH"))
+  }) %>%
+    left_join(fig4_region_catalog %>% select(TargetRegionKey = RegionKey, TargetAnnotation = Annotation, TargetAbbreviation = Abbreviation, TargetClass = Class, TargetShort = RegionShort), by = "TargetRegionKey") %>%
+    mutate(
+      Metric = metric,
+      covariance_note = "CeM-seed covariance tests whether inter-animal variation in CeM signal is associated with variation in other regions. It is not interpreted as causal or anatomical connectivity."
+    )
+
+  readr::write_csv(out, file.path(fig4_supp_tab_dir, paste0("supp_fig4_CeM_seed_covariance_", metric, ".csv")))
+  openxlsx::write.xlsx(out, file.path(fig4_supp_tab_dir, paste0("supp_fig4_CeM_seed_covariance_", metric, ".xlsx")), overwrite = TRUE)
+
+  p <- out %>%
+    filter(!is.na(rho)) %>%
+    mutate(TargetShort = factor(TargetShort, levels = rev(unique(TargetShort[order(abs(rho), decreasing = TRUE)])))) %>%
+    ggplot(aes(x = Condition, y = TargetShort, fill = rho)) +
+    geom_tile(colour = "white", linewidth = 0.12) +
+    scale_fill_gradient2(low = "#3B6EA8", mid = "white", high = "#C44E52", midpoint = 0,
+                         limits = c(-1, 1), oob = scales::squish, na.value = "grey88", name = "rho") +
+    fig4_theme(base_size = 6.0) +
+    theme(axis.text.x = element_text(angle = 35, hjust = 1), axis.text.y = element_text(size = 5.0)) +
+    labs(title = paste0("Exploratory CeM-seed covariance: ", value_label), subtitle = "Spearman rho across animals; grey/omitted = n_pair < 5", x = NULL, y = NULL)
+
+  save_fig4_plot(p, paste0("supp_fig4_CeM_seed_covariance_", metric), width = 5.2, height = 5.8, dir = fig4_supp_fig_dir)
+  invisible(out)
+}
+
+make_cem_seed_covariance("Cell_Count", "cFos+ cell count")
+make_cem_seed_covariance("Intensity", "projection intensity")
+
+fig4_seed_terms <- c("CEAl", "CeM", "LA", "PVH")
+fig4_seed_candidates <- fig4_prior_decisions %>%
+  filter(prior_term %in% fig4_seed_terms, selected_representative, !is.na(RegionKey)) %>%
+  transmute(SeedLabel = prior_term, SeedRegionKey = RegionKey)
+write_fig4_table(fig4_seed_candidates, "supp_exploratory_covariance_seed_matching", dir = fig4_supp_tab_dir)
+
+fig4_covariation_results <- tibble()
+if (nrow(fig4_seed_candidates) > 0) {
+  sm_cell_fig4 <- make_sample_matrix(long, "Cell_Count")
+  mat_cell_fig4 <- safe_log1p(sm_cell_fig4$mat)
+  meta_cell_fig4 <- sm_cell_fig4$annotation %>% mutate(Condition = factor(as.character(Condition), levels = nature_condition_levels))
+  fig4_covariation_results <- purrr::pmap_dfr(fig4_seed_candidates, function(SeedLabel, SeedRegionKey) {
+    purrr::map_dfr(nature_condition_levels, function(cond) {
+      ids <- meta_cell_fig4 %>% filter(Condition == cond) %>% pull(SampleID)
+      submat <- mat_cell_fig4[rownames(mat_cell_fig4) %in% ids, , drop = FALSE]
+      if (!SeedRegionKey %in% colnames(submat) || nrow(submat) < min_pairwise_n) return(tibble())
+      tibble(TargetRegionKey = setdiff(colnames(submat), SeedRegionKey)) %>%
+        rowwise() %>%
+        mutate(
+          SeedLabel = SeedLabel,
+          SeedRegionKey = SeedRegionKey,
+          Condition = cond,
+          n_pair = sum(is.finite(submat[, SeedRegionKey]) & is.finite(submat[, TargetRegionKey])),
+          rho = if (n_pair >= min_pairwise_n) suppressWarnings(cor(submat[, SeedRegionKey], submat[, TargetRegionKey], method = "spearman", use = "pairwise.complete.obs")) else NA_real_,
+          p_value = if (n_pair >= min_pairwise_n && !is.na(rho)) suppressWarnings(tryCatch(cor.test(submat[, SeedRegionKey], submat[, TargetRegionKey], method = "spearman", exact = FALSE)$p.value, error = function(e) NA_real_)) else NA_real_
+        ) %>%
+        ungroup() %>%
+        group_by(SeedLabel, SeedRegionKey, Condition) %>%
+        mutate(fdr = p.adjust(p_value, method = "BH")) %>%
+        ungroup()
+    })
+  }) %>%
+    left_join(fig4_region_catalog %>% select(TargetRegionKey = RegionKey, TargetAnnotation = Annotation, TargetAbbreviation = Abbreviation, TargetClass = Class), by = "TargetRegionKey") %>%
+    mutate(
+      covariance_display = n_pair >= fig4_cov_min_n_pair & !is.na(rho),
+      thresholded_covariance = covariance_display & abs(rho) >= fig4_cov_abs_r_cutoff & fdr <= fig4_cov_fdr_cutoff,
+      terminology_note = fig4_covariance_note
+    )
+}
+write_fig4_table(fig4_covariation_results, "supp_exploratory_seed_based_cfos_covariance", dir = fig4_supp_tab_dir)
+
+fig4_cov_summary <- fig4_covariation_results %>%
+  filter(!is.na(rho)) %>%
+  group_by(SeedLabel, Condition) %>%
   summarise(
-    n_edges = n(),
-    mean_rho = mean(rho, na.rm = TRUE),
-    signed_covariation_strength = sum(rho, na.rm = TRUE),
+    n_estimated_pairs = n(),
+    n_display_pairs = sum(covariance_display, na.rm = TRUE),
+    n_thresholded_positive = sum(thresholded_covariance & rho > 0, na.rm = TRUE),
+    n_thresholded_negative = sum(thresholded_covariance & rho < 0, na.rm = TRUE),
+    mean_abs_rho = mean(abs(rho[covariance_display]), na.rm = TRUE),
+    terminology_note = fig4_covariance_note,
     .groups = "drop"
-  ) %>%
-  complete(
-    SeedLabel,
-    Condition = nature_condition_levels,
-    edge_sign = c("Positive", "Negative"),
-    fill = list(n_edges = 0, mean_rho = NA_real_, signed_covariation_strength = 0)
-  ) %>%
-  mutate(
-    Condition = factor(Condition, levels = nature_condition_levels),
-    ConditionLabel = factor(fig4_condition_labels[as.character(Condition)], levels = fig4_condition_labels)
   )
-
-fig4G_strength <- fig4G_summary %>%
-  group_by(SeedLabel, Condition, ConditionLabel) %>%
-  summarise(signed_covariation_strength = sum(signed_covariation_strength, na.rm = TRUE), .groups = "drop")
-
-write_fig4_table(fig4G_source, "fig4G_network_rewiring_edges_source")
-write_fig4_table(fig4G_summary, "fig4G_network_rewiring_summary")
-
-fig4G <- if (nrow(fig4G_summary) > 0 && any(fig4G_summary$n_edges > 0)) {
-  edge_count_plot <- ggplot(fig4G_summary, aes(x = ConditionLabel, y = n_edges, fill = edge_sign)) +
-    geom_col(width = 0.62, colour = "grey20", linewidth = 0.15, position = position_dodge(width = 0.68)) +
-    facet_wrap(~ SeedLabel, nrow = 1) +
-    scale_fill_manual(values = c(Positive = "#C44E52", Negative = "#3B6EA8"), name = NULL) +
-    fig4_theme(base_size = 6.5) +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5.2), legend.position = "bottom") +
-    labs(title = "Condition-specific co-activation structure", x = NULL, y = "Thresholded edges")
-
-  strength_plot <- ggplot(fig4G_strength, aes(x = ConditionLabel, y = signed_covariation_strength, colour = SeedLabel, group = SeedLabel)) +
-    geom_hline(yintercept = 0, linewidth = 0.22, colour = "grey55") +
-    geom_line(linewidth = 0.3) +
-    geom_point(size = 1.7) +
-    fig4_theme(base_size = 6.5) +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5.2), legend.position = "bottom") +
-    labs(title = "Signed covariation strength", x = NULL, y = "sum rho")
-
-  edge_count_plot / strength_plot + patchwork::plot_layout(heights = c(1.15, 1))
-} else {
-  fig4_note_skip("Panel G", "No seed-based cFos covariation edges passed the rho/FDR threshold.")
-  NULL
-}
-save_fig4_plot(fig4G, "fig4G_network_rewiring_summary", width = 7.4, height = 5.2)
-
-fig4_panel_list <- list(fig4B, fig4C, fig4D, fig4E, fig4F, fig4G)
-fig4_panel_list <- fig4_panel_list[!vapply(fig4_panel_list, is.null, logical(1))]
-
-fig4_combined <- NULL
-if (length(fig4_panel_list) > 0) {
-  fig4_combined <- patchwork::wrap_plots(fig4_panel_list, ncol = 2, guides = "collect") +
-    patchwork::plot_annotation(tag_levels = list(c("B", "C", "D", "E", "F", "G"))) &
-    theme(plot.tag = element_text(face = "bold", size = 9), legend.position = "bottom")
-
-  save_fig4_plot(fig4_combined, "fig4_main_manuscript_matched_combined", width = 13.5, height = 14.5)
-} else {
-  fig4_note_skip("Combined Fig. 4", "All manuscript-matched panels were skipped.")
-}
+write_fig4_table(fig4_cov_summary, "supp_exploratory_cfos_covariance_summary", dir = fig4_supp_tab_dir)
 
 fig4_readme <- c(
-  "Manuscript-matched Fig. 4 generation",
+  "Manuscript-ready Fig. 4 generation",
   "",
   paste0("Input data used: ", paste(sort(unique(long$SourceFile)), collapse = "; ")),
+  "Final main figure: fig4_main_learning_stress_activity_projection_final.svg/pdf/png.",
+  "Main panels: A condition/contrast key, B projection intensity effects, C cFos+ cell-count effects, D raw key-region profiles, E activity-projection dissociation, F descriptive animal-level PCA.",
+  "Central contrasts visualized:",
+  paste0("- ", fig4_sign_key$contrast, ": ", fig4_sign_key$contrast_formula, "; positive = ", fig4_sign_key$positive_logFC_means),
   "",
-  "Contrasts visualized:",
-  paste0("- ", fig4_main_contrasts, ": ", fig4_contrast_labels[fig4_main_contrasts]),
-  "",
-  paste0("Region selection: manuscript-prioritized terms were matched flexibly against Annotation and Abbreviation; one best-covered representative per term was plotted, then additional top regions by maximum absolute logFC and at least ", fig4_min_estimable_contrasts_total, " estimable contrasts were added up to approximately ", fig4_max_heatmap_regions, " regions."),
-  "Alternative matches for broad manuscript terms are documented but not plotted in the main figure to avoid turning Fig. 4 into a missingness map.",
-  paste0("Manuscript-prioritized terms: ", paste(fig4_prior_terms, collapse = ", ")),
-  "Missing data handling: missing/non-estimable effect-map cells are kept as NA and rendered grey; no missing region values are imputed for manuscript-facing panels.",
-  "Availability tables report n_samples_total, n_non_missing, n_missing, and pct_missing by region, metric, and condition.",
-  "",
-  paste0("Covariation method: Spearman correlations across animals using Cell_Count only; computed minimum n_pair = ", min_pairwise_n, "."),
-  paste0("Covariation heatmap display threshold: n_pair >= ", fig4_cov_min_n_pair, "; lower-n or non-estimable cells are rendered grey and documented in the source table."),
-  paste0("Network/co-activation summary threshold: n_pair >= ", fig4_cov_min_n_pair, ", abs(rho) >= ", fig4_cov_abs_r_cutoff, " and FDR <= ", fig4_cov_fdr_cutoff, "."),
-  "",
-  "Terminology: panels describe regional cFos covariation and condition-specific co-activation structure, not causal connectivity.",
+  "Effect maps use raw log1p values by default. Normalized log1p analyses are exported for comparison.",
+  "Missing effect-map cells are retained as NA and rendered grey; no missing values are imputed for manuscript-facing effect maps.",
+  "Region selection uses manuscript priority first, then estimable central contrasts, effect magnitude, and raw P value only as a secondary tie-breaker.",
+  "Projection intensity and regional cFos recruitment are treated as related but distinct readouts; no causal relation is implied.",
+  "Supplementary condition-specific inter-regional covariance heatmaps and CeM-seed covariance analyses are exploratory outputs and are not interpreted as anatomical connectivity, functional connectivity, causality, or rewiring.",
   "",
   "Skipped panels or warnings:",
   if (length(fig4_skipped_panels) == 0) "- None" else paste0("- ", fig4_skipped_panels)
