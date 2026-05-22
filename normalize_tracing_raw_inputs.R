@@ -6,9 +6,14 @@
 #   tracing_cfos_correlation.r, especially duplicated/truncated Class/Level
 #   metadata for the same Allen-style region abbreviation.
 #
-# Input examples:
-#   CellCountNoOutliersFin.csv
-#   IntensityNoOutliersFin.xlsx
+# Important logic:
+#   1) Read CellCountNoOutliersFin.csv and IntensityNoOutliersFin.xlsx.
+#   2) Optionally read FINAL.csv as a metadata-only reference if present.
+#      This is useful because CellCountNoOutliersFin.csv can contain regions
+#      that are not present in IntensityNoOutliersFin.xlsx, so those regions
+#      cannot be repaired from intensity alone.
+#   3) Build one canonical metadata row per abbreviation.
+#   4) Fill missing/truncated Annotation, Class, and Level in the raw files.
 #
 # Output:
 #   raw_input_normalized/CellCountNoOutliersFin_normalized.csv
@@ -17,6 +22,7 @@
 #   raw_input_normalized/QC_region_metadata_corrections.csv
 #   raw_input_normalized/QC_abbreviation_canonical_reference.csv
 #   raw_input_normalized/QC_abbreviation_ambiguous_candidates.csv
+#   raw_input_normalized/QC_missing_metadata_after_normalization.csv
 #
 # Recommended downstream use:
 #   In tracing_cfos_correlation.r, point the raw input paths to the normalized
@@ -39,12 +45,18 @@ input_dir <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/Results Final tracing"
 
 cell_count_raw_file <- file.path(input_dir, "CellCountNoOutliersFin.csv")
 intensity_raw_file  <- file.path(input_dir, "IntensityNoOutliersFin.xlsx")
+final_reference_file <- file.path(input_dir, "FINAL.csv")
 
 out_dir <- file.path(input_dir, "raw_input_normalized")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 # Safety default: never overwrite originals unless explicitly changed.
 overwrite_originals <- FALSE
+
+# If TRUE, missing Class values that cannot be repaired from any reference are
+# set to "Unknown". Level is still left as NA because fabricating anatomical
+# depth would be worse than explicit missingness.
+fill_unresolved_class_with_unknown <- TRUE
 
 # -----------------------------
 # 2. Helpers
@@ -71,55 +83,49 @@ metadata_quality_score <- function(annotation, class, level) {
   annotation <- clean_chr(annotation)
   class <- clean_chr(class)
 
-  dplyr::case_when(
-    TRUE ~
-      100 * !is.na(level) +
-      50 * !is_bad_class(class) +
-      0.10 * stringr::str_length(dplyr::coalesce(class, "")) +
-      0.01 * stringr::str_length(dplyr::coalesce(annotation, ""))
-  )
+  100 * !is.na(level) +
+    50 * !is_bad_class(class) +
+    0.10 * stringr::str_length(dplyr::coalesce(class, "")) +
+    0.01 * stringr::str_length(dplyr::coalesce(annotation, ""))
 }
 
-first_nonmissing <- function(x) {
-  x <- x[!is.na(x) & x != ""]
-  if (length(x) == 0) NA else x[[1]]
+changed_chr <- function(before, after) {
+  dplyr::coalesce(as.character(before), "<NA>") != dplyr::coalesce(as.character(after), "<NA>")
 }
 
-read_tracing_raw_file <- function(path, file_role = c("cell_count", "intensity")) {
-  file_role <- match.arg(file_role)
-  if (!fs::file_exists(path)) stop("Input file not found: ", path)
+changed_int <- function(before, after) {
+  dplyr::coalesce(as.integer(before), -999999L) != dplyr::coalesce(as.integer(after), -999999L)
+}
 
+read_table_flexible <- function(path) {
   ext <- tolower(fs::path_ext(path))
-  message("Reading ", file_role, " file: ", path)
-
-  x <- switch(
+  switch(
     ext,
     csv  = readr::read_csv(path, show_col_types = FALSE, guess_max = 100000),
     txt  = readr::read_csv(path, show_col_types = FALSE, guess_max = 100000),
     xlsx = openxlsx::read.xlsx(path),
     stop("Unsupported file extension: ", ext, ". Expected csv, txt, or xlsx.")
   )
+}
 
+standardize_region_columns <- function(x, source_file, file_role) {
   x <- x %>% janitor::clean_names()
 
-  # Handle minimal two-column CSVs such as Annotation,Cell_Count if needed.
-  # For full files, this leaves all existing columns intact.
+  # Common variants.
   names(x) <- stringr::str_replace_all(names(x), "^cellcount$", "cell_count")
+  names(x) <- stringr::str_replace_all(names(x), "^abbrev$", "abbreviation")
+  names(x) <- stringr::str_replace_all(names(x), "^abbr$", "abbreviation")
 
   if (!"annotation" %in% names(x)) {
-    stop("Missing required column 'annotation' after clean_names() in ", fs::path_file(path))
+    stop("Missing required column 'annotation' after clean_names() in ", source_file)
   }
-
-  if (!"abbreviation" %in% names(x)) {
-    # Fall back to Annotation when the raw table only has region abbreviations.
-    x <- x %>% mutate(abbreviation = annotation)
-  }
+  if (!"abbreviation" %in% names(x)) x <- x %>% mutate(abbreviation = annotation)
   if (!"class" %in% names(x)) x <- x %>% mutate(class = NA_character_)
   if (!"level" %in% names(x)) x <- x %>% mutate(level = NA_integer_)
 
   x %>%
     mutate(
-      .source_file = fs::path_file(path),
+      .source_file = source_file,
       .file_role = file_role,
       annotation = clean_chr(annotation),
       abbreviation = clean_chr(abbreviation),
@@ -131,17 +137,46 @@ read_tracing_raw_file <- function(path, file_role = c("cell_count", "intensity")
     )
 }
 
-make_canonical_reference <- function(combined_raw) {
-  candidates <- combined_raw %>%
+read_tracing_raw_file <- function(path, file_role = c("cell_count", "intensity")) {
+  file_role <- match.arg(file_role)
+  if (!fs::file_exists(path)) stop("Input file not found: ", path)
+
+  message("Reading ", file_role, " file: ", path)
+  read_table_flexible(path) %>%
+    standardize_region_columns(source_file = fs::path_file(path), file_role = file_role)
+}
+
+read_metadata_reference_file <- function(path) {
+  if (!fs::file_exists(path)) {
+    message("No FINAL.csv metadata reference found at: ", path)
+    return(tibble())
+  }
+
+  message("Reading metadata reference file: ", path)
+  read_table_flexible(path) %>%
+    standardize_region_columns(source_file = fs::path_file(path), file_role = "metadata_reference") %>%
+    select(
+      .source_file, .file_role,
+      annotation, abbreviation, class, level,
+      .abbreviation_clean, .annotation_clean, .metadata_score_before
+    ) %>%
+    distinct()
+}
+
+make_canonical_reference <- function(combined_metadata) {
+  candidates <- combined_metadata %>%
     filter(!is.na(.abbreviation_clean), .abbreviation_clean != "") %>%
     group_by(.abbreviation_clean, annotation, abbreviation, class, level) %>%
     summarise(
       n_rows = n(),
       n_files = n_distinct(.source_file),
+      source_files = paste(sort(unique(.source_file)), collapse = "; "),
+      source_roles = paste(sort(unique(.file_role)), collapse = "; "),
       score = first(metadata_quality_score(annotation, class, level)),
       .groups = "drop"
     ) %>%
     mutate(
+      # Strongly prefer complete ontology metadata, then repeated evidence.
       total_score = score + log1p(n_rows) + 0.5 * n_files
     )
 
@@ -156,6 +191,8 @@ make_canonical_reference <- function(combined_raw) {
       canonical_abbreviation = abbreviation,
       canonical_class = class,
       canonical_level = level,
+      canonical_source_files = source_files,
+      canonical_source_roles = source_roles,
       canonical_n_rows = n_rows,
       canonical_score = score,
       canonical_total_score = total_score
@@ -175,7 +212,7 @@ make_canonical_reference <- function(combined_raw) {
 }
 
 normalize_region_metadata <- function(raw_df, canonical_ref) {
-  raw_df %>%
+  out <- raw_df %>%
     left_join(canonical_ref, by = ".abbreviation_clean") %>%
     mutate(
       .class_before = class,
@@ -200,16 +237,22 @@ normalize_region_metadata <- function(raw_df, canonical_ref) {
       ),
 
       # Fill missing Level from the canonical reference. Do not overwrite a
-      # non-missing Level unless you decide to do so manually after QC.
-      level = coalesce(level, canonical_level),
+      # non-missing Level unless manually reviewed.
+      level = coalesce(level, canonical_level)
+    )
 
+  if (fill_unresolved_class_with_unknown) {
+    out <- out %>% mutate(class = if_else(is.na(class) | class == "", "Unknown", class))
+  }
+
+  out %>%
+    mutate(
       .metadata_score_after = metadata_quality_score(annotation, class, level),
       .metadata_changed =
-        !identical(.annotation_before, annotation) |
-        !identical(.abbreviation_before, abbreviation) |
-        !identical(.class_before, class) |
-        !identical(.level_before, level),
-
+        changed_chr(.annotation_before, annotation) |
+        changed_chr(.abbreviation_before, abbreviation) |
+        changed_chr(.class_before, class) |
+        changed_int(.level_before, level),
       RegionLabel = paste0(annotation, " | ", abbreviation),
       RegionKey = paste(class, RegionLabel, sep = " :: ")
     )
@@ -230,14 +273,33 @@ write_normalized_outputs <- function(cell_norm, intensity_norm, canonical_ref, a
       class_after = class,
       level_before = .level_before,
       level_after = level,
+      canonical_source_files,
+      canonical_source_roles,
       metadata_score_before = .metadata_score_before,
       metadata_score_after = .metadata_score_after
     ) %>%
     distinct()
 
+  missing_after <- bind_rows(cell_norm, intensity_norm) %>%
+    filter(is.na(class) | class == "" | is.na(level)) %>%
+    transmute(
+      source_file = .source_file,
+      file_role = .file_role,
+      abbreviation_clean = .abbreviation_clean,
+      annotation,
+      abbreviation,
+      class,
+      level,
+      canonical_source_files,
+      canonical_source_roles
+    ) %>%
+    distinct() %>%
+    arrange(file_role, abbreviation_clean)
+
   readr::write_csv(correction_log, file.path(out_dir, "QC_region_metadata_corrections.csv"))
   readr::write_csv(canonical_ref, file.path(out_dir, "QC_abbreviation_canonical_reference.csv"))
   readr::write_csv(ambiguous_ref, file.path(out_dir, "QC_abbreviation_ambiguous_candidates.csv"))
+  readr::write_csv(missing_after, file.path(out_dir, "QC_missing_metadata_after_normalization.csv"))
 
   drop_internal <- function(x) {
     x %>% select(-starts_with("."), -starts_with("canonical_"))
@@ -263,6 +325,7 @@ write_normalized_outputs <- function(cell_norm, intensity_norm, canonical_ref, a
 
   message("Done. Normalized files written to: ", out_dir)
   message("Corrections log: ", file.path(out_dir, "QC_region_metadata_corrections.csv"))
+  message("Remaining missing metadata QC: ", file.path(out_dir, "QC_missing_metadata_after_normalization.csv"))
 }
 
 # -----------------------------
@@ -270,9 +333,10 @@ write_normalized_outputs <- function(cell_norm, intensity_norm, canonical_ref, a
 # -----------------------------
 cell_raw <- read_tracing_raw_file(cell_count_raw_file, file_role = "cell_count")
 intensity_raw <- read_tracing_raw_file(intensity_raw_file, file_role = "intensity")
+final_ref <- read_metadata_reference_file(final_reference_file)
 
-combined_raw <- bind_rows(cell_raw, intensity_raw)
-refs <- make_canonical_reference(combined_raw)
+combined_metadata <- bind_rows(cell_raw, intensity_raw, final_ref)
+refs <- make_canonical_reference(combined_metadata)
 
 cell_norm <- normalize_region_metadata(cell_raw, refs$canonical)
 intensity_norm <- normalize_region_metadata(intensity_raw, refs$canonical)
@@ -294,3 +358,10 @@ summary_table <- bind_rows(cell_norm, intensity_norm) %>%
   )
 
 print(summary_table)
+
+if (any(summary_table$n_missing_level_after > 0)) {
+  message(
+    "Some Level values are still missing. Inspect QC_missing_metadata_after_normalization.csv. ",
+    "These are likely abbreviations that are absent from both IntensityNoOutliersFin.xlsx and FINAL.csv metadata."
+  )
+}
