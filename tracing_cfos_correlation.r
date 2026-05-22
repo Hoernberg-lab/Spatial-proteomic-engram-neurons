@@ -37,6 +37,40 @@ dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path(out_dir, "figures"), recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path(out_dir, "tables"), recursive = TRUE, showWarnings = FALSE)
 
+results_root <- file.path(out_dir, "results")
+publication_fig4_fig_dir <- file.path(results_root, "01_publication", "figures", "fig4")
+publication_supp_fig_dir <- file.path(results_root, "01_publication", "figures", "supplementary")
+publication_dashboard_fig_dir <- file.path(results_root, "01_publication", "figures", "dashboards")
+publication_fig4_tab_dir <- file.path(results_root, "01_publication", "tables", "fig4")
+publication_supp_tab_dir <- file.path(results_root, "01_publication", "tables", "supplementary")
+publication_source_tab_dir <- file.path(results_root, "01_publication", "tables", "source_data")
+publication_manifest_dir <- file.path(results_root, "01_publication", "manifests")
+exploratory_covariance_dir <- file.path(results_root, "02_exploratory", "covariance")
+exploratory_network_dir <- file.path(results_root, "02_exploratory", "network_analysis")
+exploratory_dimred_dir <- file.path(results_root, "02_exploratory", "dimensionality_reduction")
+exploratory_sensitivity_dir <- file.path(results_root, "02_exploratory", "sensitivity_analysis")
+qc_missingness_dir <- file.path(results_root, "03_qc", "missingness")
+qc_normalization_dir <- file.path(results_root, "03_qc", "normalization")
+qc_region_selection_dir <- file.path(results_root, "03_qc", "region_selection")
+qc_covariance_dir <- file.path(results_root, "03_qc", "covariance_qc")
+legacy_dir <- file.path(results_root, "04_legacy")
+legacy_fig_dir <- file.path(legacy_dir, "figures")
+legacy_tab_dir <- file.path(legacy_dir, "tables")
+session_info_dir <- file.path(results_root, "session_info")
+purrr::walk(
+  c(
+    publication_fig4_fig_dir, publication_supp_fig_dir, publication_dashboard_fig_dir,
+    publication_fig4_tab_dir, publication_supp_tab_dir, publication_source_tab_dir,
+    publication_manifest_dir, exploratory_covariance_dir, exploratory_network_dir,
+    exploratory_dimred_dir, exploratory_sensitivity_dir, qc_missingness_dir,
+    qc_normalization_dir, qc_region_selection_dir, qc_covariance_dir,
+    legacy_dir, legacy_fig_dir, legacy_tab_dir, session_info_dir
+  ),
+  dir.create,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
 metrics_to_analyse <- c("Cell_Count", "Intensity")
 
 condition_lookup <- tibble::tribble(
@@ -299,6 +333,8 @@ long <- raw_long %>%
 
 openxlsx::write.xlsx(long, file.path(out_dir, "tables", "merged_long_region_data.xlsx"), overwrite = TRUE)
 readr::write_csv(long, file.path(out_dir, "tables", "merged_long_region_data.csv"))
+openxlsx::write.xlsx(long, file.path(legacy_tab_dir, "merged_long_region_data.xlsx"), overwrite = TRUE)
+readr::write_csv(long, file.path(legacy_tab_dir, "merged_long_region_data.csv"))
 
 # Animal counts sanity check
 animal_counts <- long %>%
@@ -306,6 +342,7 @@ animal_counts <- long %>%
   count(Group, Condition, name = "n_animals")
 
 openxlsx::write.xlsx(animal_counts, file.path(out_dir, "tables", "QC_animal_counts_by_condition.xlsx"), overwrite = TRUE)
+openxlsx::write.xlsx(animal_counts, file.path(legacy_tab_dir, "QC_animal_counts_by_condition.xlsx"), overwrite = TRUE)
 
 animal_level_qc <- long %>%
   group_by(SampleID, Animal, Sample, Group, Condition) %>%
@@ -411,8 +448,25 @@ openxlsx::write.xlsx(
   file.path(out_dir, "tables", "animal_region_qc_tables.xlsx"),
   overwrite = TRUE
 )
+openxlsx::write.xlsx(
+  list(
+    animal_counts = animal_counts,
+    animal_level_qc = animal_level_qc,
+    animal_coverage_signal = QC_animal_level_coverage_signal,
+    region_condition_missingness = region_condition_missingness_qc,
+    region_level_availability = QC_region_level_availability,
+    minimum_n_filter = minimum_n_filter_qc
+  ),
+  file.path(legacy_tab_dir, "animal_region_qc_tables.xlsx"),
+  overwrite = TRUE
+)
 readr::write_csv(QC_animal_level_coverage_signal, file.path(out_dir, "tables", "QC_animal_level_coverage_signal.csv"))
 readr::write_csv(QC_region_level_availability, file.path(out_dir, "tables", "QC_region_level_availability.csv"))
+readr::write_csv(QC_animal_level_coverage_signal, file.path(legacy_tab_dir, "QC_animal_level_coverage_signal.csv"))
+readr::write_csv(QC_region_level_availability, file.path(legacy_tab_dir, "QC_region_level_availability.csv"))
+readr::write_csv(QC_animal_level_coverage_signal, file.path(qc_missingness_dir, "QC_animal_level_coverage_signal.csv"))
+readr::write_csv(QC_region_level_availability, file.path(qc_missingness_dir, "QC_region_level_availability.csv"))
+readr::write_csv(region_condition_missingness_qc, file.path(qc_missingness_dir, "QC_region_condition_missingness_by_metric.csv"))
 
 qc_condition_plot_labels <- c(
   VEH_paired = "VEH-L",
@@ -429,9 +483,14 @@ qc_condition_colors <- c(
 )
 
 save_qc_figure <- function(plot, filename_base, width, height, dpi = 600) {
+  dir.create(file.path(out_dir, "figures"), recursive = TRUE, showWarnings = FALSE)
+  dir.create(legacy_fig_dir, recursive = TRUE, showWarnings = FALSE)
   ggsave(file.path(out_dir, "figures", paste0(filename_base, ".pdf")), plot, width = width, height = height)
   ggsave(file.path(out_dir, "figures", paste0(filename_base, ".svg")), plot, width = width, height = height, device = svglite::svglite)
   ggsave(file.path(out_dir, "figures", paste0(filename_base, ".png")), plot, width = width, height = height, dpi = dpi, bg = "white")
+  ggsave(file.path(legacy_fig_dir, paste0(filename_base, ".pdf")), plot, width = width, height = height)
+  ggsave(file.path(legacy_fig_dir, paste0(filename_base, ".svg")), plot, width = width, height = height, device = svglite::svglite)
+  ggsave(file.path(legacy_fig_dir, paste0(filename_base, ".png")), plot, width = width, height = height, dpi = dpi, bg = "white")
 }
 
 qc_plot_animal_metric <- function(data, y_col, title, y_label, filename_base) {
@@ -626,9 +685,14 @@ theme_nature <- function(base_size = 8) {
 }
 
 save_figure <- function(plot, filename_base, width, height, dpi = 600) {
+  dir.create(file.path(out_dir, "figures"), recursive = TRUE, showWarnings = FALSE)
+  dir.create(legacy_fig_dir, recursive = TRUE, showWarnings = FALSE)
   ggsave(file.path(out_dir, "figures", paste0(filename_base, ".pdf")), plot, width = width, height = height)
   ggsave(file.path(out_dir, "figures", paste0(filename_base, ".svg")), plot, width = width, height = height, device = svglite::svglite)
   ggsave(file.path(out_dir, "figures", paste0(filename_base, ".png")), plot, width = width, height = height, dpi = dpi, bg = "white")
+  ggsave(file.path(legacy_fig_dir, paste0(filename_base, ".pdf")), plot, width = width, height = height)
+  ggsave(file.path(legacy_fig_dir, paste0(filename_base, ".svg")), plot, width = width, height = height, device = svglite::svglite)
+  ggsave(file.path(legacy_fig_dir, paste0(filename_base, ".png")), plot, width = width, height = height, dpi = dpi, bg = "white")
 }
 
 make_group_summary_matrix <- function(data, metric) {
@@ -879,9 +943,12 @@ plot_network <- function(mat, metric, class_filter = NULL) {
   if (ncol(mat) < 4) return(NULL)
 
   cors <- cor_with_p(mat, min_n = min_pairwise_n) %>%
-    filter(region1 < region2, !is.na(r), abs(r) >= network_abs_r_cutoff, fdr <= network_fdr_cutoff)
+    filter(region1 < region2, !is.na(r), abs(r) >= network_abs_r_cutoff, fdr <= network_fdr_cutoff) %>%
+    mutate(fdr_scope = "BH across all pairwise region tests in this metric/class-filtered exploratory network")
 
   readr::write_csv(cors, file.path(out_dir, "tables", paste0("network_edges_", metric, "_", title_suffix, ".csv")))
+  readr::write_csv(cors, file.path(legacy_tab_dir, paste0("network_edges_", metric, "_", title_suffix, ".csv")))
+  readr::write_csv(cors, file.path(exploratory_network_dir, paste0("Network_edges_", metric, "_", title_suffix, ".csv")))
 
   if (nrow(cors) < 2) return(NULL)
 
@@ -916,6 +983,12 @@ plot_network <- function(mat, metric, class_filter = NULL) {
 
   ggsave(file.path(out_dir, "figures", paste0("network_", metric, "_", title_suffix, ".pdf")),
          p, width = 9, height = 7)
+  ggsave(file.path(legacy_fig_dir, paste0("network_", metric, "_", title_suffix, ".pdf")),
+         p, width = 9, height = 7)
+  ggsave(file.path(exploratory_network_dir, paste0("Network_", metric, "_", title_suffix, ".pdf")),
+         p, width = 9, height = 7)
+  ggsave(file.path(exploratory_network_dir, paste0("Network_", metric, "_", title_suffix, ".png")),
+         p, width = 9, height = 7, dpi = 600, bg = "white")
 }
 
 all_classes <- sort(unique(long$Class))
@@ -925,6 +998,7 @@ for (metric in metrics_to_analyse) {
 
   summary_df <- make_group_summary_matrix(long, metric)
   readr::write_csv(summary_df, file.path(out_dir, "tables", paste0("group_summary_", metric, ".csv")))
+  readr::write_csv(summary_df, file.path(legacy_tab_dir, paste0("group_summary_", metric, ".csv")))
 
   plot_group_heatmap(summary_df, metric, class_filter = NULL)
   purrr::walk(all_classes, ~ plot_group_heatmap(summary_df, metric, class_filter = .x))
@@ -1157,9 +1231,21 @@ normalization_comparison <- purrr::imap_dfr(normalized_metric_lookup, function(r
 })
 
 readr::write_csv(normalization_comparison, file.path(out_dir, "tables", "normalization_comparison_raw_vs_normalized_log1p.csv"))
+readr::write_csv(normalization_comparison, file.path(legacy_tab_dir, "normalization_comparison_raw_vs_normalized_log1p.csv"))
+readr::write_csv(normalization_comparison, file.path(qc_normalization_dir, "normalization_comparison_raw_vs_normalized_log1p.csv"))
 openxlsx::write.xlsx(
   c(contrast_tables_normalized, list(normalization_comparison = normalization_comparison)),
   file.path(out_dir, "tables", "region_group_contrasts_limma_normalized_log1p.xlsx"),
+  overwrite = TRUE
+)
+openxlsx::write.xlsx(
+  c(contrast_tables_normalized, list(normalization_comparison = normalization_comparison)),
+  file.path(legacy_tab_dir, "region_group_contrasts_limma_normalized_log1p.xlsx"),
+  overwrite = TRUE
+)
+openxlsx::write.xlsx(
+  c(contrast_tables_normalized, list(normalization_comparison = normalization_comparison)),
+  file.path(qc_normalization_dir, "region_group_contrasts_limma_normalized_log1p.xlsx"),
   overwrite = TRUE
 )
 
@@ -1215,11 +1301,27 @@ openxlsx::write.xlsx(
   file.path(out_dir, "tables", "region_group_contrasts_limma_log1p.xlsx"),
   overwrite = TRUE
 )
+openxlsx::write.xlsx(
+  c(
+    contrast_tables,
+    set_names(candidate_tables, paste0(names(candidate_tables), "_ranked_candidates"))
+  ),
+  file.path(legacy_tab_dir, "region_group_contrasts_limma_log1p.xlsx"),
+  overwrite = TRUE
+)
 
 for (metric in names(candidate_tables)) {
   readr::write_csv(
     candidate_tables[[metric]],
     file.path(out_dir, "tables", paste0("ranked_candidate_regions_", metric, ".csv"))
+  )
+  readr::write_csv(
+    candidate_tables[[metric]],
+    file.path(legacy_tab_dir, paste0("ranked_candidate_regions_", metric, ".csv"))
+  )
+  readr::write_csv(
+    candidate_tables[[metric]],
+    file.path(exploratory_sensitivity_dir, paste0("Ranked_candidate_regions_", metric, ".csv"))
   )
 }
 
@@ -1356,6 +1458,7 @@ class_level_long <- long %>%
   )
 
 openxlsx::write.xlsx(class_level_long, file.path(out_dir, "tables", "class_level_long.xlsx"), overwrite = TRUE)
+openxlsx::write.xlsx(class_level_long, file.path(legacy_tab_dir, "class_level_long.xlsx"), overwrite = TRUE)
 
 plot_class_profiles <- function(metric) {
   d <- class_level_long %>% filter(Metric == metric)
@@ -1416,6 +1519,9 @@ plot_dimensionality <- function(data, metric) {
     )
 
   save_figure(p1, paste0("PCA_systems_structure_", metric), width = 5.5, height = 4.5)
+  ggsave(file.path(exploratory_dimred_dir, paste0("PCA_descriptive_animal_level_", metric, ".pdf")), p1, width = 5.5, height = 4.5)
+  ggsave(file.path(exploratory_dimred_dir, paste0("PCA_descriptive_animal_level_", metric, ".svg")), p1, width = 5.5, height = 4.5, device = svglite::svglite)
+  ggsave(file.path(exploratory_dimred_dir, paste0("PCA_descriptive_animal_level_", metric, ".png")), p1, width = 5.5, height = 4.5, dpi = 600, bg = "white")
 
   set.seed(1)
   umap_mat <- uwot::umap(mat_z, n_neighbors = min(6, nrow(mat_z) - 1), min_dist = 0.2, metric = "euclidean")
@@ -1437,11 +1543,23 @@ plot_dimensionality <- function(data, metric) {
       y = "UMAP2"
     )
 
-  save_figure(p2, paste0("UMAP_systems_structure_", metric), width = 5.5, height = 4.5)
+  ggsave(file.path(exploratory_dimred_dir, paste0("UMAP_exploratory_animal_level_", metric, ".pdf")), p2, width = 5.5, height = 4.5)
+  ggsave(file.path(exploratory_dimred_dir, paste0("UMAP_exploratory_animal_level_", metric, ".svg")), p2, width = 5.5, height = 4.5, device = svglite::svglite)
+  ggsave(file.path(exploratory_dimred_dir, paste0("UMAP_exploratory_animal_level_", metric, ".png")), p2, width = 5.5, height = 4.5, dpi = 600, bg = "white")
 
   openxlsx::write.xlsx(
     list(PCA = pca_df, UMAP = umap_df),
     file.path(out_dir, "tables", paste0("dimensionality_outputs_", metric, ".xlsx")),
+    overwrite = TRUE
+  )
+  openxlsx::write.xlsx(
+    list(PCA = pca_df, UMAP = umap_df),
+    file.path(legacy_tab_dir, paste0("dimensionality_outputs_", metric, ".xlsx")),
+    overwrite = TRUE
+  )
+  openxlsx::write.xlsx(
+    list(PCA_descriptive = pca_df, UMAP_exploratory = umap_df),
+    file.path(exploratory_dimred_dir, paste0("Dimensionality_reduction_descriptive_exploratory_", metric, ".xlsx")),
     overwrite = TRUE
   )
 }
@@ -1553,10 +1671,10 @@ run_cem_connectivity <- function(data, metric) {
 purrr::walk(metrics_to_analyse, ~ run_cem_connectivity(long, .x))
 
 # -----------------------------
-# 14. Nature-style main figure
+# 14. Legacy exploratory main figure
 # -----------------------------
-main_fig_dir <- file.path(out_dir, "figures", "main_figure_nature")
-main_tab_dir <- file.path(out_dir, "tables", "main_figure_nature")
+main_fig_dir <- file.path(legacy_dir, "figures", "main_figure")
+main_tab_dir <- file.path(legacy_dir, "tables", "main_figure")
 dir.create(main_fig_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(main_tab_dir, recursive = TRUE, showWarnings = FALSE)
 
@@ -1755,10 +1873,10 @@ make_cem_metric_plot <- function(cem_values, cem_stats, metric, y_label) {
       axis.text.x = element_text(angle = 35, hjust = 1),
       legend.position = "none"
     ) +
-    labs(x = NULL, y = y_label, title = paste0("CeM ", if_else(metric == "Cell_Count", "activity", "projection signal")))
+    labs(x = NULL, y = y_label, title = paste0("CeM ", if_else(metric == "Cell_Count", "cFos+ cell count", "projection signal")))
 }
 
-make_activity_projection_scatter <- function() {
+make_cfos_projection_scatter <- function() {
   d <- full_join(
     contrast_tables$Cell_Count %>%
       filter(contrast == "Learning_effect") %>%
@@ -1776,10 +1894,10 @@ make_activity_projection_scatter <- function() {
     ) %>%
     arrange(desc(combined_abs_effect))
 
-  readr::write_csv(d, file.path(main_tab_dir, "main_figure_activity_projection_scatter.csv"))
+  readr::write_csv(d, file.path(main_tab_dir, "main_figure_cfos_cell_count_projection_scatter.csv"))
 
   if (nrow(d) < 3) {
-    write_main_warning("main_figure_scatter_warning.txt", "Activity-projection scatter skipped: fewer than 3 regions with paired learning effects.")
+    write_main_warning("main_figure_scatter_warning.txt", "cFos cell-count/projection scatter skipped: fewer than 3 regions with paired learning effects.")
     return(NULL)
   }
 
@@ -2517,6 +2635,14 @@ make_network_rewiring_figure <- function(data,
   readr::write_csv(hubs, file.path(main_tab_dir, paste0("main_figure_network_hub_centrality_by_metric", edge_rule_suffix, ".csv")))
   readr::write_csv(edges, file.path(main_tab_dir, paste0("main_figure_network_edges_by_metric", edge_rule_suffix, ".csv")))
   readr::write_csv(edge_rewiring, file.path(main_tab_dir, paste0("main_figure_network_edge_rewiring_by_metric", edge_rule_suffix, ".csv")))
+  readr::write_csv(metrics %>% mutate(fdr_scope = "within condition x metric network edge tests"),
+                   file.path(exploratory_network_dir, paste0("Network_metrics", edge_rule_suffix, ".csv")))
+  readr::write_csv(hubs %>% mutate(fdr_scope = "within condition x metric network edge tests"),
+                   file.path(exploratory_network_dir, paste0("Network_hub_centrality", edge_rule_suffix, ".csv")))
+  readr::write_csv(edges %>% mutate(fdr_scope = "within condition x metric network edge tests"),
+                   file.path(exploratory_network_dir, paste0("Network_edges", edge_rule_suffix, ".csv")))
+  readr::write_csv(edge_rewiring %>% mutate(fdr_scope = "within condition x metric network edge tests"),
+                   file.path(exploratory_network_dir, paste0("Network_rewiring", edge_rule_suffix, ".csv")))
 
   reference_suffix <- paste0("_vs_", reference_condition)
   rewiring_columns <- grep(paste0("^rewiring_.*", reference_suffix, "$"), names(edge_rewiring), value = TRUE)
@@ -2596,6 +2722,10 @@ make_network_rewiring_figure <- function(data,
 
   readr::write_csv(edge_overlap, file.path(main_tab_dir, paste0("main_figure_network_cell_intensity_edge_overlap", edge_rule_suffix, ".csv")))
   readr::write_csv(edge_overlap_summary, file.path(main_tab_dir, paste0("main_figure_network_cell_intensity_edge_overlap_summary", edge_rule_suffix, ".csv")))
+  readr::write_csv(edge_overlap %>% mutate(fdr_scope = "within condition x metric network edge tests"),
+                   file.path(exploratory_network_dir, paste0("Network_overlap_cell_count_intensity", edge_rule_suffix, ".csv")))
+  readr::write_csv(edge_overlap_summary %>% mutate(fdr_scope = "within condition x metric network edge tests"),
+                   file.path(exploratory_network_dir, paste0("Network_overlap_cell_count_intensity_summary", edge_rule_suffix, ".csv")))
 
   metric_plot <- metrics %>%
     select(NetworkMetric, NetworkCondition, density, modularity, mean_abs_r) %>%
@@ -2903,7 +3033,7 @@ if (is.null(cem_candidate)) {
   panel_c <- make_cem_metric_plot(cem_values, cem_stats, "Intensity", "Projection intensity, log1p")
 }
 
-panel_d <- make_activity_projection_scatter()
+panel_d <- make_cfos_projection_scatter()
 panel_e <- make_learning_stress_heatmap(top_n = 12)
 panel_f <- make_main_pca(long)
 panel_network <- make_network_rewiring_figure(
@@ -2946,14 +3076,14 @@ if (length(main_panels) >= 1) {
     theme(plot.tag = element_text(face = "bold", size = 9))
 
   safe_main_ggsave(
-    file.path(main_fig_dir, "main_figure_learning_vs_stress_activity_projection.pdf"),
+    file.path(main_fig_dir, "main_figure_learning_vs_stress_cfos_cell_count_projection.pdf"),
     main_plot,
     width = 180 / 25.4,
     height = 255 / 25.4,
     units = "in"
   )
   safe_main_ggsave(
-    file.path(main_fig_dir, "main_figure_learning_vs_stress_activity_projection.svg"),
+    file.path(main_fig_dir, "main_figure_learning_vs_stress_cfos_cell_count_projection.svg"),
     main_plot,
     width = 180 / 25.4,
     height = 255 / 25.4,
@@ -2961,7 +3091,7 @@ if (length(main_panels) >= 1) {
     device = svglite::svglite
   )
   safe_main_ggsave(
-    file.path(main_fig_dir, "main_figure_learning_vs_stress_activity_projection.png"),
+    file.path(main_fig_dir, "main_figure_learning_vs_stress_cfos_cell_count_projection.png"),
     main_plot,
     width = 180 / 25.4,
     height = 255 / 25.4,
@@ -2970,16 +3100,16 @@ if (length(main_panels) >= 1) {
   )
 
 } else {
-  write_main_warning("main_figure_warning.txt", "Nature-style main figure was not generated because every panel was skipped.")
+  write_main_warning("main_figure_warning.txt", "Legacy exploratory main figure was not generated because every panel was skipped.")
 }
 
 # -----------------------------
 # 15. Manuscript-ready Fig. 4 and supplementary exploratory outputs
 # -----------------------------
-fig4_fig_dir <- file.path(out_dir, "figures", "fig4_manuscript_matched")
-fig4_tab_dir <- file.path(out_dir, "tables", "fig4_manuscript_matched")
-fig4_supp_fig_dir <- file.path(out_dir, "figures", "fig4_supplementary_exploratory")
-fig4_supp_tab_dir <- file.path(out_dir, "tables", "fig4_supplementary_exploratory")
+fig4_fig_dir <- publication_fig4_fig_dir
+fig4_tab_dir <- publication_fig4_tab_dir
+fig4_supp_fig_dir <- publication_supp_fig_dir
+fig4_supp_tab_dir <- publication_supp_tab_dir
 dir.create(fig4_fig_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(fig4_tab_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(fig4_supp_fig_dir, recursive = TRUE, showWarnings = FALSE)
@@ -2987,7 +3117,7 @@ dir.create(fig4_supp_tab_dir, recursive = TRUE, showWarnings = FALSE)
 
 fig4_deprecated_main_bases <- c(
   "fig4_main_manuscript_matched_combined",
-  "fig4_main_learning_stress_activity_projection",
+  "fig4_main_learning_stress_cfos_cell_count_projection",
   "fig4F_seed_based_cfos_covariation",
   "fig4G_network_rewiring_summary"
 )
@@ -3000,7 +3130,7 @@ fig4_deprecated_table_bases <- c(
   "fig4D_key_region_condition_profiles_source",
   "fig4D_key_region_condition_profiles_summary",
   "fig4D_key_region_condition_profiles_availability",
-  "fig4E_activity_projection_dissociation_source",
+  "fig4E_cfos_cell_count_projection_dissociation_source",
   "fig4F_seed_based_cfos_covariation_source",
   "fig4F_seed_based_cfos_covariation_warnings",
   "fig4F_seed_region_matching",
@@ -3036,15 +3166,8 @@ fig4_condition_labels <- c(
   CNO_paired = "CNO paired",
   CNO_unpaired = "CNO unpaired"
 )
-fig4_prior_terms <- c(
-  "ECT", "LA", "PVi", "PVH", "AV", "SS", "RSP", "AVP", "GU",
-  "CeM", "PVa", "MEPO", "VMPO", "DMH", "STN", "SFO", "RCH",
-  "SO", "PeF", "TRS", "GPe", "PALd", "GPi", "CEAl", "SF"
-)
-fig4_max_heatmap_regions <- 16
-fig4_min_main_abs_logfc_prior <- 0.15
-fig4_min_main_abs_logfc_ranked <- 0.25
-fig4_min_main_raw_p <- 0.10
+fig4_max_heatmap_regions <- 10
+fig4_min_main_non_na_display <- 2
 fig4_profile_region_n <- 3
 fig4_min_profile_n_per_condition <- 2
 fig4_cov_abs_r_cutoff <- 0.70
@@ -3069,6 +3192,7 @@ fig4_note_skip <- function(panel, reason) {
 
 save_fig4_plot <- function(plot, filename_base, width, height, dir = fig4_fig_dir, dpi = 600) {
   if (is.null(plot)) return(invisible(NULL))
+  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
   for (ext in c("svg", "pdf", "png")) {
     filename <- file.path(dir, paste0(filename_base, ".", ext))
     if (ext == "svg") {
@@ -3083,6 +3207,7 @@ save_fig4_plot <- function(plot, filename_base, width, height, dir = fig4_fig_di
 }
 
 write_fig4_table <- function(x, filename_base, dir = fig4_tab_dir) {
+  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
   readr::write_csv(x, file.path(dir, paste0(filename_base, ".csv")))
   openxlsx::write.xlsx(x, file.path(dir, paste0(filename_base, ".xlsx")), overwrite = TRUE)
   invisible(x)
@@ -3123,12 +3248,16 @@ fig4_region_catalog <- long %>%
     Abbreviation_lower = str_to_lower(coalesce(Abbreviation, "")),
     RegionLabel_lower = str_to_lower(coalesce(RegionLabel, "")),
     RegionShort = fig4_short_region(Annotation, Abbreviation),
-    ParentAbbreviationCandidate = fig4_parent_abbreviation_candidate(Annotation)
+    ParentAbbreviationCandidate = fig4_parent_abbreviation_candidate(Abbreviation)
   )
 
 fig4_parent_lookup <- fig4_region_catalog %>%
-  distinct(ParentAbbreviationCandidate = Annotation, MainRegionAnnotation = Abbreviation) %>%
-  filter(!is.na(ParentAbbreviationCandidate), ParentAbbreviationCandidate != "") %>%
+  distinct(ParentAbbreviationCandidate = Abbreviation, MainRegionAnnotation = Annotation) %>%
+  filter(
+    !is.na(ParentAbbreviationCandidate),
+    ParentAbbreviationCandidate != "",
+    ParentAbbreviationCandidate %in% fig4_region_catalog$Abbreviation
+  ) %>%
   group_by(ParentAbbreviationCandidate) %>%
   slice(1) %>%
   ungroup()
@@ -3136,8 +3265,13 @@ fig4_parent_lookup <- fig4_region_catalog %>%
 fig4_region_catalog <- fig4_region_catalog %>%
   left_join(fig4_parent_lookup, by = "ParentAbbreviationCandidate") %>%
   mutate(
-    MainRegionAbbreviation = coalesce(ParentAbbreviationCandidate, Abbreviation),
-    MainRegion = coalesce(MainRegionAnnotation, MainRegionAbbreviation, Annotation, Abbreviation, "Unknown"),
+    parent_collapsing_note = if_else(
+      !is.na(MainRegionAnnotation) & ParentAbbreviationCandidate != Abbreviation,
+      "parent label inferred from abbreviation stem present in data",
+      "original region label retained; parent inference unavailable or unnecessary"
+    ),
+    MainRegionAbbreviation = if_else(!is.na(MainRegionAnnotation), ParentAbbreviationCandidate, Abbreviation),
+    MainRegion = coalesce(MainRegionAnnotation, Annotation, Abbreviation, "Unknown"),
     MainRegionShort = str_trunc(coalesce(MainRegionAbbreviation, MainRegion), 16),
     SystemGroup = fig4_system_group(Class, Annotation, Abbreviation, RegionLabel),
     SystemGroup = factor(SystemGroup, levels = fig4_system_levels),
@@ -3156,9 +3290,29 @@ fig4_region_condition_n <- QC_region_level_availability %>%
     missing_VEH_paired, missing_VEH_unpaired, missing_CNO_paired, missing_CNO_unpaired
   )
 
+fig4_metric_region_condition_n <- region_condition_missingness_qc %>%
+  select(
+    RegionKey, Condition, n_cell_count, n_intensity,
+    missing_cell_count, missing_intensity
+  ) %>%
+  pivot_longer(
+    cols = c(n_cell_count, n_intensity, missing_cell_count, missing_intensity),
+    names_to = c(".value", "metric_stub"),
+    names_pattern = "^(n|missing)_(cell_count|intensity)$"
+  ) %>%
+  mutate(
+    Metric = recode(metric_stub, cell_count = "Cell_Count", intensity = "Intensity")
+  ) %>%
+  select(RegionKey, Metric, Condition, n, missing) %>%
+  pivot_wider(
+    names_from = Condition,
+    values_from = c(n, missing),
+    values_fill = 0
+  )
+
 fig4_add_contrast_qc <- function(data) {
   data %>%
-    left_join(fig4_region_condition_n, by = "RegionKey") %>%
+    left_join(fig4_metric_region_condition_n, by = c("RegionKey", "Metric")) %>%
     rowwise() %>%
     mutate(
       min_n_per_relevant_group = case_when(
@@ -3203,112 +3357,269 @@ fig4_all_effects <- purrr::imap_dfr(contrast_tables, function(res, metric) {
            logFC, AveExpr, t, P.Value, adj.P.Val.global, n_samples, note)
 }) %>%
   fig4_add_contrast_qc()
-write_fig4_table(fig4_all_effects, "fig4_all_region_central_contrast_effects", dir = fig4_supp_tab_dir)
+write_fig4_table(fig4_all_effects, "Fig4_all_region_central_contrast_effects", dir = publication_source_tab_dir)
+write_fig4_table(fig4_all_effects, "Fig4_all_region_central_contrast_effects", dir = fig4_supp_tab_dir)
+
+run_fig4_complete_case_contrasts <- function(data, metric) {
+  metric_sym <- sym(metric)
+  region_meta <- data %>%
+    distinct(RegionKey, Class, Annotation, Abbreviation, Level, RegionLabel)
+
+  purrr::map_dfr(fig4_main_contrasts, function(co) {
+    needed_conditions <- switch(
+      co,
+      Learning_effect = c("VEH_paired", "VEH_unpaired"),
+      CeM_manipulation_during_learning = c("CNO_paired", "VEH_paired"),
+      CeM_manipulation_during_stress = c("CNO_unpaired", "VEH_unpaired"),
+      Learning_x_CeM_interaction = c("VEH_paired", "VEH_unpaired", "CNO_paired", "CNO_unpaired")
+    )
+
+    data %>%
+      filter(Condition %in% needed_conditions) %>%
+      select(SampleID, Condition, RegionKey, RawValue = !!metric_sym) %>%
+      mutate(Value = safe_log1p(RawValue)) %>%
+      group_by(RegionKey) %>%
+      group_modify(function(d, key) {
+        d <- d %>% filter(!is.na(Value), !is.na(Condition))
+        n_by_condition <- d %>%
+          count(Condition, name = "n") %>%
+          complete(Condition = needed_conditions, fill = list(n = 0))
+        min_n <- min(n_by_condition$n)
+        region_sd <- stats::sd(d$Value, na.rm = TRUE)
+        if (min_n < 2 || !is.finite(region_sd) || region_sd == 0) {
+          return(tibble(
+            contrast = co,
+            complete_case_logFC = NA_real_,
+            complete_case_P.Value = NA_real_,
+            complete_case_n = nrow(d),
+            complete_case_min_n_per_group = min_n,
+            complete_case_note = "not estimable: fewer than 2 complete observations per relevant group or zero variance"
+          ))
+        }
+
+        d <- d %>%
+          mutate(
+            Condition = factor(as.character(Condition), levels = nature_condition_levels),
+            Paired = if_else(Condition %in% c("VEH_paired", "CNO_paired"), "paired", "unpaired"),
+            Drug = if_else(Condition %in% c("CNO_paired", "CNO_unpaired"), "CNO", "VEH")
+          )
+
+        if (co == "Learning_x_CeM_interaction") {
+          fit <- tryCatch(stats::lm(Value ~ Paired * Drug, data = d), error = function(e) NULL)
+          if (is.null(fit)) {
+            estimate <- NA_real_
+            p_value <- NA_real_
+          } else {
+            means <- d %>% group_by(Condition) %>% summarise(m = mean(Value), .groups = "drop") %>% deframe()
+            estimate <- (means[["CNO_paired"]] - means[["VEH_paired"]]) -
+              (means[["CNO_unpaired"]] - means[["VEH_unpaired"]])
+            coef_tab <- summary(fit)$coefficients
+            interaction_row <- grep("Paired.*Drug|Drug.*Paired", rownames(coef_tab), value = TRUE)
+            p_value <- if (length(interaction_row) > 0) coef_tab[interaction_row[[1]], "Pr(>|t|)"] else NA_real_
+          }
+        } else {
+          first_condition <- needed_conditions[[1]]
+          second_condition <- needed_conditions[[2]]
+          estimate <- mean(d$Value[d$Condition == first_condition], na.rm = TRUE) -
+            mean(d$Value[d$Condition == second_condition], na.rm = TRUE)
+          p_value <- suppressWarnings(
+            tryCatch(stats::t.test(Value ~ Condition, data = d)$p.value, error = function(e) NA_real_)
+          )
+        }
+
+        tibble(
+          contrast = co,
+          complete_case_logFC = unname(estimate),
+          complete_case_P.Value = p_value,
+          complete_case_n = nrow(d),
+          complete_case_min_n_per_group = min_n,
+          complete_case_note = "complete-case raw log1p contrast"
+        )
+      }) %>%
+      ungroup()
+  }) %>%
+    mutate(Metric = metric, .before = 1) %>%
+    left_join(region_meta, by = "RegionKey") %>%
+    group_by(Metric, contrast) %>%
+    mutate(complete_case_adj.P.Val.global = p.adjust(complete_case_P.Value, method = "BH")) %>%
+    ungroup()
+}
+
+fig4_complete_case_effects <- purrr::map_dfr(metrics_to_analyse, ~ run_fig4_complete_case_contrasts(long, .x)) %>%
+  mutate(
+    logFC = complete_case_logFC,
+    P.Value = complete_case_P.Value,
+    adj.P.Val.global = complete_case_adj.P.Val.global
+  ) %>%
+  fig4_add_contrast_qc()
+write_fig4_table(fig4_complete_case_effects, "Fig4_complete_case_central_contrast_effects", dir = exploratory_sensitivity_dir)
+
+fig4_stability_inputs <- bind_rows(
+  purrr::imap_dfr(contrast_tables, function(res, metric) {
+    res %>%
+      filter(contrast %in% fig4_main_contrasts) %>%
+      transmute(
+        analysis_variant = "raw_log1p_limma_median_imputed",
+        Metric = metric,
+        contrast,
+        RegionKey,
+        logFC,
+        P.Value,
+        adj.P.Val.global,
+        normalization = "none",
+        imputation = "region median before limma"
+      )
+  }),
+  purrr::imap_dfr(normalized_metric_lookup, function(raw_metric, norm_metric) {
+    contrast_tables_normalized[[norm_metric]] %>%
+      filter(contrast %in% fig4_main_contrasts) %>%
+      transmute(
+        analysis_variant = "normalized_log1p_limma_median_imputed",
+        Metric = raw_metric,
+        contrast,
+        RegionKey,
+        logFC,
+        P.Value,
+        adj.P.Val.global,
+        normalization = "animal-level normalized metric",
+        imputation = "region median before limma"
+      )
+  }),
+  fig4_complete_case_effects %>%
+    transmute(
+      analysis_variant = "raw_log1p_complete_case",
+      Metric,
+      contrast,
+      RegionKey,
+      logFC = complete_case_logFC,
+      P.Value = complete_case_P.Value,
+      adj.P.Val.global = complete_case_adj.P.Val.global,
+      normalization = "none",
+      imputation = "none; complete cases only"
+    )
+) %>%
+  mutate(
+    logFC = suppressWarnings(as.numeric(logFC)),
+    P.Value = suppressWarnings(as.numeric(P.Value)),
+    adj.P.Val.global = suppressWarnings(as.numeric(adj.P.Val.global))
+  ) %>%
+  filter(!is.na(logFC)) %>%
+  group_by(analysis_variant, Metric, contrast) %>%
+  arrange(desc(abs(logFC)), P.Value, .by_group = TRUE) %>%
+  mutate(abs_effect_rank = row_number()) %>%
+  ungroup() %>%
+  group_by(analysis_variant, Metric, contrast, RegionKey) %>%
+  summarise(
+    logFC = first(logFC),
+    P.Value = first(P.Value),
+    adj.P.Val.global = first(adj.P.Val.global),
+    abs_effect_rank = first(abs_effect_rank),
+    normalization = first(normalization),
+    imputation = first(imputation),
+    .groups = "drop"
+  )
+
+fig4_stability_comparison <- fig4_stability_inputs %>%
+  select(analysis_variant, Metric, contrast, RegionKey, logFC, P.Value, adj.P.Val.global, abs_effect_rank, normalization, imputation) %>%
+  pivot_wider(
+    names_from = analysis_variant,
+    values_from = c(logFC, P.Value, adj.P.Val.global, abs_effect_rank, normalization, imputation),
+    names_sep = "__"
+  ) %>%
+  {
+    d <- .
+    expected_numeric_cols <- c(
+      "logFC__raw_log1p_limma_median_imputed",
+      "logFC__normalized_log1p_limma_median_imputed",
+      "logFC__raw_log1p_complete_case",
+      "P.Value__raw_log1p_limma_median_imputed",
+      "P.Value__normalized_log1p_limma_median_imputed",
+      "P.Value__raw_log1p_complete_case",
+      "adj.P.Val.global__raw_log1p_limma_median_imputed",
+      "adj.P.Val.global__normalized_log1p_limma_median_imputed",
+      "adj.P.Val.global__raw_log1p_complete_case",
+      "abs_effect_rank__raw_log1p_limma_median_imputed",
+      "abs_effect_rank__normalized_log1p_limma_median_imputed",
+      "abs_effect_rank__raw_log1p_complete_case"
+    )
+    for (col in setdiff(expected_numeric_cols, names(d))) d[[col]] <- NA_real_
+    d
+  } %>%
+  mutate(
+    across(starts_with("logFC__"), ~ suppressWarnings(as.numeric(.x))),
+    across(starts_with("P.Value__"), ~ suppressWarnings(as.numeric(.x))),
+    across(starts_with("adj.P.Val.global__"), ~ suppressWarnings(as.numeric(.x))),
+    across(starts_with("abs_effect_rank__"), ~ suppressWarnings(as.numeric(.x)))
+  ) %>%
+  mutate(
+    direction_stable_raw_vs_normalized = sign(logFC__raw_log1p_limma_median_imputed) ==
+      sign(logFC__normalized_log1p_limma_median_imputed),
+    direction_stable_raw_vs_complete_case = sign(logFC__raw_log1p_limma_median_imputed) ==
+      sign(logFC__raw_log1p_complete_case),
+    rank_shift_raw_vs_normalized = abs_effect_rank__normalized_log1p_limma_median_imputed -
+      abs_effect_rank__raw_log1p_limma_median_imputed,
+    rank_shift_raw_vs_complete_case = abs_effect_rank__raw_log1p_complete_case -
+      abs_effect_rank__raw_log1p_limma_median_imputed
+  ) %>%
+  left_join(fig4_region_catalog %>% select(RegionKey, Class, Annotation, Abbreviation, RegionLabel), by = "RegionKey") %>%
+  arrange(Metric, contrast, abs_effect_rank__raw_log1p_limma_median_imputed)
+write_fig4_table(fig4_stability_comparison, "Sensitivity_stability_raw_normalized_complete_case_imputed", dir = exploratory_sensitivity_dir)
 
 fig4_effect_rank <- fig4_all_effects %>%
-  group_by(RegionKey, Class, Annotation, Abbreviation, Level, RegionLabel) %>%
+  group_by(Metric, RegionKey, Class, Annotation, Abbreviation, Level, RegionLabel) %>%
   summarise(
-    n_estimable_contrasts_total = sum(qc_flag != "excluded_insufficient_n" & !is.na(logFC)),
-    max_abs_effect = if (any(qc_flag != "excluded_insufficient_n" & !is.na(logFC))) max(abs(logFC[qc_flag != "excluded_insufficient_n"]), na.rm = TRUE) else NA_real_,
+    n_estimable_contrasts_total = sum(qc_flag != "excluded_insufficient_n" & !is.na(logFC_main_display)),
+    max_abs_effect = if (any(!is.na(logFC_main_display))) max(abs(logFC_main_display), na.rm = TRUE) else NA_real_,
     min_raw_p = if (any(!is.na(P.Value))) min(P.Value, na.rm = TRUE) else NA_real_,
     .groups = "drop"
   ) %>%
   mutate(max_abs_effect = coalesce(max_abs_effect, 0), min_raw_p = coalesce(min_raw_p, Inf))
 
-fig4_match_prior_term <- function(term) {
-  term_lower <- str_to_lower(term)
-  exact <- fig4_region_catalog %>%
-    filter(Annotation_lower == term_lower | Abbreviation_lower == term_lower)
-  broad <- if (term_lower == "ss") {
-    fig4_region_catalog %>% filter(str_starts(Annotation_lower, "ss") | str_detect(Abbreviation_lower, "somatosensory"))
-  } else if (term_lower == "cem") {
-    fig4_region_catalog %>%
-      filter(Annotation_lower %in% c("cem", "ceam") |
-               Abbreviation_lower %in% c("cem", "ceam", "cea-m", "cea m") |
-               str_detect(RegionLabel_lower, "central amygdalar nucleus, medial|central amygdalar nucleus medial"))
-  } else {
-    fig4_region_catalog %>%
-      filter(str_detect(Annotation_lower, fixed(term_lower)) | str_detect(Abbreviation_lower, fixed(term_lower)))
-  }
-  bind_rows(exact %>% mutate(match_type = "exact"), broad %>% mutate(match_type = "broad")) %>%
-    distinct(RegionKey, .keep_all = TRUE) %>%
-    mutate(prior_term = term, prior_found = TRUE, .before = 1)
-}
-
-fig4_prior_matches <- purrr::map_dfr(fig4_prior_terms, fig4_match_prior_term)
-fig4_missing_prior_terms <- setdiff(fig4_prior_terms, unique(fig4_prior_matches$prior_term))
-if (length(fig4_missing_prior_terms) > 0) {
-  fig4_prior_matches <- bind_rows(
-    fig4_prior_matches,
-    tibble(
-      prior_term = fig4_missing_prior_terms,
-      prior_found = FALSE,
-      match_type = NA_character_,
-      RegionKey = NA_character_,
-      Annotation = NA_character_,
-      Abbreviation = NA_character_,
-      Class = NA_character_,
-      Level = NA_integer_,
-      RegionLabel = NA_character_,
-      Annotation_lower = NA_character_,
-      Abbreviation_lower = NA_character_,
-      RegionLabel_lower = NA_character_,
-      RegionShort = NA_character_
-    )
-  )
-}
-
-fig4_prior_representatives <- fig4_prior_matches %>%
-  filter(prior_found, !is.na(RegionKey)) %>%
-  left_join(fig4_effect_rank, by = c("RegionKey", "Class", "Annotation", "Abbreviation", "Level", "RegionLabel")) %>%
+fig4_effect_rank_region_summary <- fig4_effect_rank %>%
+  group_by(RegionKey, Class, Annotation, Abbreviation, Level, RegionLabel) %>%
+  summarise(
+    n_estimable_contrasts_total = max(n_estimable_contrasts_total, na.rm = TRUE),
+    max_abs_effect = max(max_abs_effect, na.rm = TRUE),
+    min_raw_p = min(min_raw_p, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
   mutate(
-    match_rank = if_else(match_type == "exact", 1L, 2L),
-    n_estimable_contrasts_total = coalesce(n_estimable_contrasts_total, 0L),
-    max_abs_effect = coalesce(max_abs_effect, 0),
-    min_raw_p = coalesce(min_raw_p, Inf)
-  ) %>%
-  group_by(prior_term) %>%
-  arrange(match_rank, desc(n_estimable_contrasts_total), desc(max_abs_effect), min_raw_p, RegionKey, .by_group = TRUE) %>%
-  slice(1) %>%
-  ungroup()
-
-fig4_prior_decisions <- fig4_prior_matches %>%
-  left_join(
-    fig4_prior_representatives %>% transmute(prior_term, RegionKey, selected_representative = TRUE),
-    by = c("prior_term", "RegionKey")
-  ) %>%
-  left_join(fig4_effect_rank %>% select(RegionKey, n_estimable_contrasts_total, max_abs_effect, min_raw_p), by = "RegionKey") %>%
-  mutate(
-    selected_representative = coalesce(selected_representative, FALSE),
-    display_decision = case_when(
-      !prior_found ~ "not found in data",
-      selected_representative ~ "selected representative",
-      TRUE ~ "excluded alternative match"
-    )
+    n_estimable_contrasts_total = if_else(is.finite(n_estimable_contrasts_total), n_estimable_contrasts_total, 0),
+    max_abs_effect = if_else(is.finite(max_abs_effect), max_abs_effect, 0),
+    min_raw_p = if_else(is.finite(min_raw_p), min_raw_p, Inf)
   )
-write_fig4_table(fig4_prior_decisions, "fig4_region_selection_documentation")
 
-fig4_prior_keys <- fig4_prior_representatives %>%
-  arrange(match_rank, desc(n_estimable_contrasts_total), desc(max_abs_effect), min_raw_p, RegionKey) %>%
-  filter(
-    n_estimable_contrasts_total > 0,
-    max_abs_effect >= fig4_min_main_abs_logfc_prior | min_raw_p <= fig4_min_main_raw_p
-  ) %>%
-  pull(RegionKey) %>%
-  unique()
-fig4_ranked_keys <- fig4_effect_rank %>%
-  filter(
-    !RegionKey %in% fig4_prior_keys,
-    n_estimable_contrasts_total >= 2,
-    max_abs_effect >= fig4_min_main_abs_logfc_ranked | min_raw_p <= fig4_min_main_raw_p
-  ) %>%
-  arrange(desc(max_abs_effect), min_raw_p) %>%
-  slice_head(n = max(fig4_max_heatmap_regions - length(fig4_prior_keys), 0)) %>%
-  pull(RegionKey)
+fig4_metric_region_selection <- purrr::map_dfr(metrics_to_analyse, function(metric_name) {
+  metric_rank <- fig4_effect_rank %>%
+    filter(Metric == metric_name) %>%
+    filter(
+      n_estimable_contrasts_total >= fig4_min_main_non_na_display
+    ) %>%
+    arrange(desc(max_abs_effect), min_raw_p, RegionKey) %>%
+    slice_head(n = fig4_max_heatmap_regions)
 
-fig4_region_selection <- bind_rows(
-  tibble(RegionKey = fig4_prior_keys, manuscript_prioritized = TRUE),
-  tibble(RegionKey = fig4_ranked_keys, manuscript_prioritized = FALSE)
+  metric_rank %>%
+    mutate(
+      Metric = metric_name,
+      selection_basis = "data-driven effect-size ranking after n/estimability filters",
+      inclusion_reason = "kept: >=2 displayed central effects after n filter; ranked by max absolute displayed logFC"
+    )
+})
+
+fig4_region_selection <- fig4_metric_region_selection %>%
+  group_by(RegionKey) %>%
+  summarise(
+    metric_specific_inclusion = paste(sort(unique(Metric)), collapse = "; "),
+    n_estimable_contrasts_total = max(n_estimable_contrasts_total, na.rm = TRUE),
+    max_abs_effect = max(max_abs_effect, na.rm = TRUE),
+    min_raw_p = min(min_raw_p, na.rm = TRUE),
+    inclusion_reason = paste(sort(unique(inclusion_reason)), collapse = "; "),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    n_estimable_contrasts_total = if_else(is.finite(n_estimable_contrasts_total), n_estimable_contrasts_total, 0),
+    max_abs_effect = if_else(is.finite(max_abs_effect), max_abs_effect, 0),
+    min_raw_p = if_else(is.finite(min_raw_p), min_raw_p, Inf)
 ) %>%
   distinct(RegionKey, .keep_all = TRUE) %>%
   left_join(
@@ -3316,45 +3627,25 @@ fig4_region_selection <- bind_rows(
       select(
         RegionKey, Annotation, Abbreviation, Class, Level, RegionLabel,
         RegionShort, SystemGroup, MainRegion, MainRegionAbbreviation, MainRegionShort,
-        MainRegionGroup, RegionDisplay
+        MainRegionGroup, RegionDisplay, parent_collapsing_note
       ),
     by = "RegionKey"
   ) %>%
-  left_join(fig4_effect_rank %>% select(RegionKey, n_estimable_contrasts_total, max_abs_effect, min_raw_p), by = "RegionKey") %>%
   filter(n_estimable_contrasts_total > 0) %>%
   mutate(
-    inclusion_reason = if_else(manuscript_prioritized, "manuscript-prioritized representative", "effect-ranked addition"),
-    main_display_filter = case_when(
-      manuscript_prioritized & max_abs_effect >= fig4_min_main_abs_logfc_prior ~ "kept: prioritized and effect threshold",
-      manuscript_prioritized & min_raw_p <= fig4_min_main_raw_p ~ "kept: prioritized and nominal evidence",
-      !manuscript_prioritized & max_abs_effect >= fig4_min_main_abs_logfc_ranked ~ "kept: ranked effect threshold",
-      !manuscript_prioritized & min_raw_p <= fig4_min_main_raw_p ~ "kept: ranked nominal evidence",
-      TRUE ~ "excluded: below display threshold"
-    ),
+    main_display_filter = "kept: >=2 displayed central effects; top ranked by max absolute displayed logFC",
+    selection_basis = "data-driven effect-size ranking after n/estimability filters",
     RegionShort = make.unique(RegionShort, sep = " "),
     RegionDisplay = make.unique(coalesce(RegionDisplay, RegionShort), sep = " "),
     Class = coalesce(Class, "Unknown")
   ) %>%
-  arrange(desc(manuscript_prioritized), desc(max_abs_effect), min_raw_p, RegionShort) %>%
-  slice_head(n = fig4_max_heatmap_regions) %>%
-  arrange(SystemGroup, MainRegionShort, desc(manuscript_prioritized), desc(max_abs_effect), RegionShort) %>%
+  arrange(SystemGroup, MainRegionShort, desc(max_abs_effect), RegionShort) %>%
   mutate(plot_order = row_number())
 
 fig4_region_ontology_qc <- fig4_region_catalog %>%
   select(
     Annotation, Abbreviation, Class, SystemGroup, MainRegion, MainRegionAbbreviation,
-    MainRegionShort, MainRegionGroup, Level, RegionKey, RegionLabel
-  ) %>%
-  left_join(
-    fig4_prior_decisions %>%
-      filter(prior_found) %>%
-      group_by(RegionKey) %>%
-      summarise(
-        manuscript_prioritized = TRUE,
-        matched_prior_terms = paste(sort(unique(prior_term)), collapse = "; "),
-        .groups = "drop"
-      ),
-    by = "RegionKey"
+    MainRegionShort, MainRegionGroup, parent_collapsing_note, Level, RegionKey, RegionLabel
   ) %>%
   left_join(fig4_region_selection %>% select(RegionKey, inclusion_reason), by = "RegionKey") %>%
   left_join(
@@ -3376,61 +3667,126 @@ fig4_region_ontology_qc <- fig4_region_catalog %>%
     by = "RegionKey"
   ) %>%
   mutate(
-    manuscript_prioritized = coalesce(manuscript_prioritized, FALSE),
     inclusion_reason = coalesce(inclusion_reason, "not included in main Fig. 4")
   )
 write_fig4_table(fig4_region_ontology_qc, "fig4_region_ontology_qc")
+write_fig4_table(fig4_region_ontology_qc, "Fig4_region_ontology_qc", dir = qc_region_selection_dir)
 write_fig4_table(normalization_comparison, "fig4_normalization_comparison")
+write_fig4_table(normalization_comparison, "Normalization_comparison_raw_vs_normalized_log1p", dir = qc_normalization_dir)
+
+fig4_region_selection_audit <- fig4_effect_rank %>%
+  left_join(
+    fig4_metric_region_selection %>%
+      select(Metric, RegionKey, selected_in_metric_heatmap = inclusion_reason),
+    by = c("Metric", "RegionKey")
+  ) %>%
+  mutate(
+    selected_in_metric_heatmap = !is.na(selected_in_metric_heatmap),
+    inclusion_reason = case_when(
+      selected_in_metric_heatmap ~ "included: >=2 displayed central effects; selected among top max absolute displayed logFC",
+      n_estimable_contrasts_total < fig4_min_main_non_na_display ~ "excluded: fewer than 2 displayed central effects after n filter",
+      TRUE ~ "excluded: outside top ranked display limit"
+    ),
+    selection_rule = paste0(
+      "Main heatmap inclusion is data-driven: min relevant group n >= 2 for displayed contrasts, at least ",
+      fig4_min_main_non_na_display,
+      " displayed central effects per metric-region, then top ",
+      fig4_max_heatmap_regions,
+      " by max absolute displayed logFC. Raw P is retained for audit/exploratory ranking, not as an inclusion rule."
+    )
+  ) %>%
+  left_join(
+    fig4_region_catalog %>% select(RegionKey, SystemGroup, MainRegion, MainRegionAbbreviation, RegionDisplay, parent_collapsing_note),
+    by = "RegionKey"
+  ) %>%
+  arrange(Metric, desc(selected_in_metric_heatmap), desc(max_abs_effect), min_raw_p)
+write_fig4_table(fig4_region_selection_audit, "Fig4_region_selection_inclusion_exclusion", dir = qc_region_selection_dir)
+write_fig4_table(fig4_region_selection_audit, "Fig4_region_selection_inclusion_exclusion", dir = publication_source_tab_dir)
 
 fig4_region_label_map <- fig4_region_selection %>%
   select(
     RegionDisplay, RegionShort, Annotation, Abbreviation, Class,
     SystemGroup, MainRegion, MainRegionAbbreviation, MainRegionShort, MainRegionGroup,
-    Level, RegionLabel, RegionKey, manuscript_prioritized, inclusion_reason,
-    main_display_filter, n_estimable_contrasts_total, max_abs_effect, min_raw_p
+    Level, RegionLabel, RegionKey, inclusion_reason, selection_basis,
+    metric_specific_inclusion, main_display_filter, parent_collapsing_note,
+    n_estimable_contrasts_total, max_abs_effect, min_raw_p
   )
 write_fig4_table(fig4_region_label_map, "fig4_region_abbreviation_key")
 
 fig4_heatmap_source <- fig4_all_effects %>%
-  filter(RegionKey %in% fig4_region_selection$RegionKey) %>%
+  inner_join(
+    fig4_metric_region_selection %>%
+      select(
+        Metric, RegionKey, selection_basis, inclusion_reason,
+        metric_n_estimable_contrasts = n_estimable_contrasts_total,
+        metric_max_abs_effect = max_abs_effect,
+        metric_min_raw_p = min_raw_p
+      ),
+    by = c("Metric", "RegionKey")
+  ) %>%
   left_join(
     fig4_region_selection %>%
       select(
         RegionKey, RegionShort, RegionDisplay, MainRegion, MainRegionAbbreviation,
-        SystemGroup, MainRegionShort, MainRegionGroup, manuscript_prioritized,
-        inclusion_reason, plot_order
+        SystemGroup, MainRegionShort, MainRegionGroup, plot_order
       ),
     by = "RegionKey"
   ) %>%
   mutate(
     contrast = factor(contrast, levels = fig4_main_contrasts),
     contrast_estimable = !is.na(logFC),
-    not_estimable_reason = if_else(contrast_estimable, NA_character_, "contrast not estimable from available non-missing values")
+    low_n_exploratory = qc_flag == "low_n_exploratory",
+    not_estimable_reason = case_when(
+      !contrast_estimable ~ "grey: contrast not estimable from available non-missing values",
+      is.na(logFC_main_display) ~ "grey: insufficient n, missing, non-estimable, or excluded from main display",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  select(
+    Metric, contrast, RegionKey, Annotation, Abbreviation, RegionDisplay, SystemGroup,
+    logFC, logFC_main_display, P.Value, adj.P.Val.global, min_n_per_relevant_group,
+    qc_flag, missingness_relevant, selection_basis, inclusion_reason,
+    low_n_exploratory, not_estimable_reason, contrast_estimable,
+    MainRegion, MainRegionAbbreviation, MainRegionShort, MainRegionGroup,
+    metric_n_estimable_contrasts, metric_max_abs_effect, metric_min_raw_p,
+    Class, Level, RegionLabel, RegionShort, plot_order
   )
 
-write_fig4_table(fig4_heatmap_source %>% filter(Metric == "Intensity"), "fig4_panelB_projection_effects")
-write_fig4_table(fig4_heatmap_source %>% filter(Metric == "Cell_Count"), "fig4_panelC_cfos_effects")
+write_fig4_table(fig4_heatmap_source %>% filter(Metric == "Intensity"), "Fig4B_projection_effect_sizes", dir = publication_source_tab_dir)
+write_fig4_table(fig4_heatmap_source %>% filter(Metric == "Cell_Count"), "Fig4C_cfos_cell_count_effect_sizes", dir = publication_source_tab_dir)
+write_fig4_table(fig4_heatmap_source %>% filter(Metric == "Intensity"), "Fig4B_projection_effect_sizes")
+write_fig4_table(fig4_heatmap_source %>% filter(Metric == "Cell_Count"), "Fig4C_cfos_cell_count_effect_sizes")
 
 fig4_heatmap_limit <- max(abs(fig4_heatmap_source$logFC_main_display), na.rm = TRUE)
 fig4_heatmap_limit <- ifelse(is.finite(fig4_heatmap_limit) && fig4_heatmap_limit > 0, fig4_heatmap_limit, 1)
 
 make_fig4_heatmap <- function(metric, title_label) {
-  d <- fig4_heatmap_source %>%
+  metric_region_order <- fig4_heatmap_source %>%
     filter(Metric == metric) %>%
+    group_by(RegionKey, RegionDisplay, SystemGroup, MainRegionShort, metric_max_abs_effect, plot_order) %>%
+    summarise(n_display_values = sum(!is.na(logFC_main_display)), .groups = "drop") %>%
+    filter(
+      n_display_values >= fig4_min_main_non_na_display
+    ) %>%
+    arrange(desc(metric_max_abs_effect), plot_order, RegionDisplay) %>%
+    slice_head(n = fig4_max_heatmap_regions) %>%
+    arrange(SystemGroup, MainRegionShort, desc(metric_max_abs_effect), RegionDisplay)
+
+  d <- fig4_heatmap_source %>%
+    filter(Metric == metric, RegionKey %in% metric_region_order$RegionKey) %>%
     mutate(
       x = as.integer(contrast),
-      y = factor(RegionDisplay, levels = rev(fig4_region_selection$RegionDisplay)),
-      prior_x = 0.35
+      y = factor(RegionDisplay, levels = rev(metric_region_order$RegionDisplay))
     )
   if (nrow(d) == 0) return(NULL)
 
   ggplot(d, aes(x = x, y = y)) +
     geom_tile(aes(fill = logFC_main_display), colour = "white", linewidth = 0.18, width = 0.92, height = 0.92) +
     geom_point(
-      data = d %>% distinct(y, manuscript_prioritized, prior_x) %>% filter(manuscript_prioritized),
-      aes(x = prior_x, y = y),
+      data = d %>% filter(low_n_exploratory, !is.na(logFC_main_display)),
+      aes(x = x, y = y),
       inherit.aes = FALSE,
-      shape = 8, size = 1.25, colour = "grey15", stroke = 0.25
+      shape = 21, size = 0.8, stroke = 0.18, colour = "grey20", fill = NA
     ) +
     facet_grid(SystemGroup ~ ., scales = "free_y", space = "free_y") +
     scale_x_continuous(
@@ -3455,7 +3811,7 @@ make_fig4_heatmap <- function(metric, title_label) {
     ) +
     labs(
       title = title_label,
-      subtitle = "* manuscript-prioritized representative; subregions are ordered by parent region within each class",
+      subtitle = "Rows require >=2 displayed central effects; open circle = low-n exploratory. Grey = missing, non-estimable, or excluded.",
       x = NULL,
       y = NULL
     )
@@ -3498,8 +3854,7 @@ fig4B <- make_fig4_heatmap("Intensity", "Projection intensity")
 fig4C <- make_fig4_heatmap("Cell_Count", "cFos+ cell count")
 
 profile_candidates <- fig4_region_selection %>%
-  mutate(priority_rank = if_else(manuscript_prioritized, 1L, 2L)) %>%
-  arrange(priority_rank, desc(max_abs_effect), min_raw_p)
+  arrange(desc(max_abs_effect), min_raw_p)
 
 profile_qc <- long %>%
   filter(RegionKey %in% profile_candidates$RegionKey) %>%
@@ -3519,9 +3874,10 @@ profile_qc <- long %>%
 
 fig4_profile_regions <- profile_qc %>%
   filter(profile_pass_min_n) %>%
-  arrange(if_else(manuscript_prioritized, 1L, 2L), desc(max_abs_effect), min_raw_p) %>%
+  arrange(desc(max_abs_effect), min_raw_p) %>%
   slice_head(n = fig4_profile_region_n)
 write_fig4_table(profile_qc, "fig4_panelD_key_region_profiles_qc")
+write_fig4_table(profile_qc, "Fig4D_key_region_profiles_qc", dir = publication_source_tab_dir)
 
 fig4D_source <- long %>%
   filter(RegionKey %in% fig4_profile_regions$RegionKey) %>%
@@ -3565,10 +3921,12 @@ fig4D_summary <- fig4D_source %>%
   mutate(ci95 = if_else(is.finite(ci95), ci95, 0), ymin = mean_value - ci95, ymax = mean_value + ci95)
 write_fig4_table(fig4D_source, "fig4_panelD_key_region_profiles")
 write_fig4_table(fig4D_summary, "fig4_panelD_key_region_profiles_summary")
+write_fig4_table(fig4D_source, "Fig4D_key_region_profiles", dir = publication_source_tab_dir)
+write_fig4_table(fig4D_summary, "Fig4D_key_region_profiles_summary", dir = publication_source_tab_dir)
 
 fig4D <- if (nrow(fig4D_source) > 0) {
   profile_region_levels <- fig4_profile_regions %>%
-    arrange(SystemGroup, MainRegionShort, desc(manuscript_prioritized), desc(max_abs_effect), RegionShort) %>%
+    arrange(SystemGroup, MainRegionShort, desc(max_abs_effect), RegionShort) %>%
     pull(RegionDisplay)
 
   ggplot(fig4D_source %>% mutate(RegionDisplay = factor(RegionDisplay, levels = profile_region_levels)), aes(x = ConditionLabel, y = Value)) +
@@ -3599,13 +3957,33 @@ fig4E_source <- full_join(
     select(RegionKey, Intensity_logFC = logFC, Intensity_P.Value = P.Value, Intensity_adj.P.Val.global = adj.P.Val.global),
   by = "RegionKey"
 ) %>%
-  left_join(fig4_region_selection %>% select(RegionKey, manuscript_prioritized), by = "RegionKey") %>%
-  left_join(fig4_region_condition_n, by = "RegionKey") %>%
+  left_join(fig4_region_selection %>% select(RegionKey, selection_basis), by = "RegionKey") %>%
+  left_join(
+    fig4_metric_region_condition_n %>%
+      filter(Metric == "Cell_Count") %>%
+      transmute(
+        RegionKey,
+        Cell_Count_min_learning_n = pmin(n_VEH_paired, n_VEH_unpaired),
+        Cell_Count_missingness_learning = paste0("VEH_paired=", missing_VEH_paired, "; VEH_unpaired=", missing_VEH_unpaired)
+      ),
+    by = "RegionKey"
+  ) %>%
+  left_join(
+    fig4_metric_region_condition_n %>%
+      filter(Metric == "Intensity") %>%
+      transmute(
+        RegionKey,
+        Intensity_min_learning_n = pmin(n_VEH_paired, n_VEH_unpaired),
+        Intensity_missingness_learning = paste0("VEH_paired=", missing_VEH_paired, "; VEH_unpaired=", missing_VEH_unpaired)
+      ),
+    by = "RegionKey"
+  ) %>%
   mutate(
-    manuscript_prioritized = coalesce(manuscript_prioritized, FALSE),
-    min_n_per_relevant_group = pmin(n_VEH_paired, n_VEH_unpaired),
+    selection_basis = coalesce(selection_basis, "not selected for Fig. 4 heatmap"),
+    min_n_per_relevant_group = pmin(Cell_Count_min_learning_n, Intensity_min_learning_n, na.rm = TRUE),
+    min_n_per_relevant_group = if_else(is.finite(min_n_per_relevant_group), min_n_per_relevant_group, NA_real_),
     qc_flag = case_when(
-      min_n_per_relevant_group < 2 ~ "excluded_insufficient_n",
+      is.na(min_n_per_relevant_group) | min_n_per_relevant_group < 2 ~ "excluded_insufficient_n",
       min_n_per_relevant_group == 2 ~ "low_n_exploratory",
       min_n_per_relevant_group >= 3 ~ "OK",
       TRUE ~ "excluded_insufficient_n"
@@ -3620,7 +3998,7 @@ fig4E_source <- full_join(
     ),
     combined_abs_effect = sqrt(Cell_Count_logFC^2 + Intensity_logFC^2),
     RegionShort = fig4_short_region(Annotation, Abbreviation),
-    label = if_else(plotted & qc_flag != "excluded_insufficient_n" & (manuscript_prioritized | rank(-combined_abs_effect, ties.method = "first", na.last = "keep") <= 5), RegionShort, NA_character_),
+    label = if_else(plotted & qc_flag != "excluded_insufficient_n" & rank(-combined_abs_effect, ties.method = "first", na.last = "keep") <= 8, RegionShort, NA_character_),
     quadrant = case_when(
       !plotted | abs(Cell_Count_logFC) < 0.05 | abs(Intensity_logFC) < 0.05 ~ "mixed or near-zero",
       Cell_Count_logFC > 0 & Intensity_logFC > 0 ~ "coupled increase",
@@ -3630,7 +4008,8 @@ fig4E_source <- full_join(
       TRUE ~ NA_character_
     )
   )
-write_fig4_table(fig4E_source, "fig4_panelE_activity_projection_scatter")
+write_fig4_table(fig4E_source, "fig4_panelE_cfos_cell_count_projection_scatter")
+write_fig4_table(fig4E_source, "Fig4E_cfos_cell_count_projection_scatter", dir = publication_source_tab_dir)
 
 fig4E_qc <- fig4E_source %>%
   summarise(
@@ -3639,20 +4018,20 @@ fig4E_qc <- fig4E_source %>%
     n_missing_cell_count_effect = sum(is.na(Cell_Count_logFC)),
     n_missing_intensity_effect = sum(is.na(Intensity_logFC))
   )
-write_fig4_table(fig4E_qc, "fig4_panelE_activity_projection_matching_qc")
+write_fig4_table(fig4E_qc, "fig4_panelE_cfos_cell_count_projection_matching_qc")
+write_fig4_table(fig4E_qc, "Fig4E_cfos_cell_count_projection_matching_qc", dir = publication_source_tab_dir)
 
 fig4E <- if (sum(fig4E_source$plotted, na.rm = TRUE) >= 3) {
   ggplot(fig4E_source %>% filter(plotted, qc_flag != "excluded_insufficient_n"), aes(x = Cell_Count_logFC, y = Intensity_logFC)) +
     geom_hline(yintercept = 0, linewidth = 0.25, colour = "grey55") +
     geom_vline(xintercept = 0, linewidth = 0.25, colour = "grey55") +
-    geom_point(aes(fill = manuscript_prioritized, size = combined_abs_effect), shape = 21, colour = "grey15", stroke = 0.18, alpha = 0.85) +
+    geom_point(aes(size = combined_abs_effect), shape = 21, fill = "grey72", colour = "grey15", stroke = 0.18, alpha = 0.85) +
     ggrepel::geom_text_repel(data = fig4E_source %>% filter(!is.na(label)), aes(label = label),
                              size = 1.9, segment.size = 0.16, min.segment.length = 0, max.overlaps = 18, force = 1.8, seed = 4) +
-    scale_fill_manual(values = c(`FALSE` = "grey72", `TRUE` = effect_colors[["positive"]]), name = "Prior") +
     scale_size_continuous(range = c(0.7, 3.2), guide = "none") +
     fig4_theme(base_size = 6.8) +
-    theme(legend.position = "bottom") +
-    labs(title = "Activity-projection dissociation", x = "Learning logFC, cFos+ cell count", y = "Learning logFC, projection intensity")
+    theme(legend.position = "none") +
+    labs(title = "cFos cell-count / projection dissociation", x = "Learning logFC, cFos+ cell count", y = "Learning logFC, projection intensity")
 } else {
   fig4_note_skip("Panel E", "Fewer than 3 regions had matched Cell_Count and Intensity effects.")
   NULL
@@ -3689,6 +4068,7 @@ make_fig4_pca <- function(data) {
     mutate(n_animals_condition = n_distinct(SampleID)) %>%
     ungroup()
   write_fig4_table(pca_df, "fig4_panelF_pca_coordinates")
+  write_fig4_table(pca_df, "Fig4F_pca_coordinates", dir = publication_source_tab_dir)
   ggplot(pca_df, aes(x = PC1, y = PC2, fill = Condition)) +
     geom_point(shape = 21, size = 2.4, colour = "grey15", stroke = 0.22, alpha = 0.9) +
     scale_fill_manual(values = nature_condition_colors, labels = fig4_condition_labels, drop = FALSE) +
@@ -3699,10 +4079,10 @@ make_fig4_pca <- function(data) {
 fig4F <- make_fig4_pca(long)
 if (is.null(fig4F)) fig4_note_skip("Panel F", "PCA skipped because too few samples or variable features were available.")
 
-save_fig4_plot(fig4B, "fig4B_projection_intensity_effect_map", width = 4.8, height = 4.9)
-save_fig4_plot(fig4C, "fig4C_cfos_activity_effect_map", width = 4.8, height = 4.9)
+save_fig4_plot(fig4B, "fig4B_projection_intensity_effect_size_map", width = 5.4, height = 6.6)
+save_fig4_plot(fig4C, "fig4C_cfos_cell_count_effect_size_map", width = 5.4, height = 6.6)
 save_fig4_plot(fig4D, "fig4D_key_region_condition_profiles", width = 8.8, height = 3.8)
-save_fig4_plot(fig4E, "fig4E_activity_projection_dissociation", width = 4.5, height = 4.0)
+save_fig4_plot(fig4E, "fig4E_cfos_cell_count_projection_dissociation", width = 4.5, height = 4.0)
 save_fig4_plot(fig4F, "fig4F_systems_level_pca", width = 4.2, height = 3.7)
 
 fig4_main <- (
@@ -3715,7 +4095,8 @@ fig4_main <- (
   patchwork::plot_annotation(tag_levels = "A") &
   theme(plot.tag = element_text(face = "bold", size = 9), legend.position = "bottom")
 
-save_fig4_plot(fig4_main, "fig4_main_learning_stress_activity_projection_final", width = 12.0, height = 10.8)
+save_fig4_plot(fig4_main, "Fig4_learning_stress_cfos_cell_count_projection", width = 12.0, height = 10.8)
+save_fig4_plot(fig4_main, "Fig4_dashboard_learning_stress_cfos_cell_count_projection", width = 8.0, height = 10.8, dir = publication_dashboard_fig_dir)
 
 make_full_effect_heatmap <- function(metric) {
   d <- fig4_all_effects %>%
@@ -3763,6 +4144,8 @@ make_full_effect_heatmap <- function(metric) {
 }
 save_fig4_plot(make_full_effect_heatmap("Intensity"), "supp_exploratory_projection_all_region_effect_heatmap", width = 7.0, height = 10.0, dir = fig4_supp_fig_dir)
 save_fig4_plot(make_full_effect_heatmap("Cell_Count"), "supp_exploratory_cfos_all_region_effect_heatmap", width = 7.0, height = 10.0, dir = fig4_supp_fig_dir)
+save_fig4_plot(make_full_effect_heatmap("Intensity"), "SuppFig4_projection_all_region_effect_heatmap", width = 7.0, height = 10.0, dir = exploratory_sensitivity_dir)
+save_fig4_plot(make_full_effect_heatmap("Cell_Count"), "SuppFig4_cfos_cell_count_all_region_effect_heatmap", width = 7.0, height = 10.0, dir = exploratory_sensitivity_dir)
 
 fig4_covariance_note <- "Exploratory Spearman covariance across animals; not interpreted as anatomical connectivity, functional connectivity, causality, or rewiring."
 
@@ -3847,8 +4230,8 @@ make_condition_correlation_outputs <- function(metric, value_label, use_normaliz
 
   write_fig4_table(
     covariance_region_coverage,
-    paste0("supp_fig4_covariance_region_coverage_", suffix),
-    dir = fig4_supp_tab_dir
+    paste0("Condition_covariance_region_coverage_", suffix),
+    dir = qc_covariance_dir
   )
 
   selected_regions <- covariance_region_coverage %>%
@@ -3868,14 +4251,14 @@ make_condition_correlation_outputs <- function(metric, value_label, use_normaliz
 
   write_fig4_table(
     pairwise_pruned$dropped_regions,
-    paste0("supp_fig4_covariance_pairwise_pruned_regions_", suffix),
-    dir = fig4_supp_tab_dir
+    paste0("Condition_covariance_pairwise_pruned_regions_", suffix),
+    dir = qc_covariance_dir
   )
 
   write_fig4_table(
     pairwise_pruned$pair_qc,
-    paste0("supp_fig4_covariance_pairwise_qc_", suffix),
-    dir = fig4_supp_tab_dir
+    paste0("Condition_covariance_pairwise_qc_", suffix),
+    dir = qc_covariance_dir
   )
 
   if (length(selected_regions) > max_covariance_regions) {
@@ -3904,8 +4287,8 @@ make_condition_correlation_outputs <- function(metric, value_label, use_normaliz
 
   write_fig4_table(
     covariance_region_selection,
-    paste0("supp_fig4_covariance_region_selection_", suffix),
-    dir = fig4_supp_tab_dir
+    paste0("Condition_covariance_region_selection_", suffix),
+    dir = qc_covariance_dir
   )
 
   wide <- long %>%
@@ -4016,6 +4399,13 @@ make_condition_correlation_outputs <- function(metric, value_label, use_normaliz
         paste0("supp_fig4_condition_correlation_matrix_", suffix, "_", cond, ".csv")
       )
     )
+    readr::write_csv(
+      cor_out,
+      file.path(
+        exploratory_covariance_dir,
+        paste0("Condition_covariance_matrix_", suffix, "_", cond, ".csv")
+      )
+    )
 
     readr::write_csv(
       p_out,
@@ -4024,12 +4414,26 @@ make_condition_correlation_outputs <- function(metric, value_label, use_normaliz
         paste0("supp_fig4_condition_pvalue_matrix_", suffix, "_", cond, ".csv")
       )
     )
+    readr::write_csv(
+      p_out,
+      file.path(
+        exploratory_covariance_dir,
+        paste0("Condition_covariance_pvalue_matrix_", suffix, "_", cond, ".csv")
+      )
+    )
 
     readr::write_csv(
       npair_out,
       file.path(
         fig4_supp_tab_dir,
         paste0("supp_fig4_condition_npair_matrix_", suffix, "_", cond, ".csv")
+      )
+    )
+    readr::write_csv(
+      npair_out,
+      file.path(
+        exploratory_covariance_dir,
+        paste0("Condition_covariance_npair_matrix_", suffix, "_", cond, ".csv")
       )
     )
 
@@ -4095,7 +4499,8 @@ make_condition_correlation_outputs <- function(metric, value_label, use_normaliz
           NA_character_
         ),
         complete_region_filter_note = covariance_caption_note,
-        covariance_note = fig4_covariance_note
+        covariance_note = fig4_covariance_note,
+        fdr_scope = "BH within each condition-specific covariance matrix; exploratory"
       )
 
     cor_long
@@ -4103,8 +4508,8 @@ make_condition_correlation_outputs <- function(metric, value_label, use_normaliz
 
   write_fig4_table(
     plot_rows,
-    paste0("supp_fig4_condition_correlation_long_", suffix),
-    dir = fig4_supp_tab_dir
+    paste0("SuppFig4_condition_covariance_", suffix),
+    dir = exploratory_covariance_dir
   )
 
   p <- ggplot(plot_rows, aes(x = Region2Short, y = Region1Short, fill = rho)) +
@@ -4160,10 +4565,10 @@ make_condition_correlation_outputs <- function(metric, value_label, use_normaliz
 
   save_fig4_plot(
     p,
-    paste0("supp_fig4_condition_correlation_heatmap_", suffix, "_complete_regions"),
+    paste0("SuppFig4_condition_covariance_", suffix),
     width = 8.0,
     height = 7.0,
-    dir = fig4_supp_fig_dir
+    dir = exploratory_covariance_dir
   )
 
   invisible(plot_rows)
@@ -4174,10 +4579,7 @@ make_condition_correlation_outputs("Intensity", "projection intensity")
 
 make_cem_seed_covariance <- function(metric, value_label, max_targets_to_plot = 24, min_seed_pair_n = 3) {
   metric_sym <- sym(metric)
-  cem_key <- fig4_prior_decisions %>%
-    filter(prior_term == "CeM", selected_representative, !is.na(RegionKey)) %>%
-    pull(RegionKey) %>%
-    first()
+  cem_key <- find_cem_region(long)
   if (is.na(cem_key) || length(cem_key) == 0) return(NULL)
 
   selected_regions <- setdiff(fig4_region_catalog$RegionKey, cem_key)
@@ -4244,7 +4646,8 @@ make_cem_seed_covariance <- function(metric, value_label, max_targets_to_plot = 
         "CeM-seed covariance tests whether inter-animal variation in CeM signal is associated with variation in other regions. ",
         "All detected regions are tested; the plot shows the strongest estimable targets for readability. ",
         "It is not interpreted as causal or anatomical connectivity."
-      )
+      ),
+      fdr_scope = "BH within each condition for CeM seed versus all estimable target regions; exploratory"
     )
 
   cem_target_ranking <- out %>%
@@ -4273,9 +4676,10 @@ make_cem_seed_covariance <- function(metric, value_label, max_targets_to_plot = 
     left_join(cem_target_ranking %>% select(TargetRegionKey, cem_target_rank = max_abs_rho), by = "TargetRegionKey") %>%
     arrange(desc(!is.na(rho)), TargetSystemGroup, TargetMainRegionShort, TargetAnnotation, factor(Condition, levels = nature_condition_levels))
 
-  readr::write_csv(out, file.path(fig4_supp_tab_dir, paste0("supp_fig4_CeM_seed_covariance_", metric, ".csv")))
-  openxlsx::write.xlsx(out, file.path(fig4_supp_tab_dir, paste0("supp_fig4_CeM_seed_covariance_", metric, ".xlsx")), overwrite = TRUE)
-  write_fig4_table(cem_target_ranking, paste0("supp_fig4_CeM_seed_covariance_target_ranking_", metric), dir = fig4_supp_tab_dir)
+  readr::write_csv(out, file.path(exploratory_covariance_dir, paste0("CeM_seed_covariance_", metric, ".csv")))
+  openxlsx::write.xlsx(out, file.path(exploratory_covariance_dir, paste0("CeM_seed_covariance_", metric, ".xlsx")), overwrite = TRUE)
+  write_fig4_table(cem_target_ranking %>% mutate(fdr_scope = "BH within each condition for CeM seed versus all estimable target regions; exploratory"),
+                   paste0("CeM_seed_covariance_target_ranking_", metric), dir = exploratory_covariance_dir)
 
   plot_targets <- cem_target_ranking %>%
     slice_head(n = max_targets_to_plot) %>%
@@ -4325,7 +4729,7 @@ make_cem_seed_covariance <- function(metric, value_label, max_targets_to_plot = 
       y = NULL
     )
 
-  save_fig4_plot(p, paste0("supp_fig4_CeM_seed_covariance_", metric), width = 5.6, height = 6.5, dir = fig4_supp_fig_dir)
+  save_fig4_plot(p, paste0("CeM_seed_covariance_", metric), width = 5.6, height = 6.5, dir = exploratory_covariance_dir)
   invisible(out)
 }
 
@@ -4333,17 +4737,43 @@ make_cem_seed_covariance("Cell_Count", "cFos+ cell count")
 make_cem_seed_covariance("Intensity", "projection intensity")
 
 fig4_seed_terms <- c("CEAl", "CeM", "LA", "PVH")
-fig4_seed_candidates <- fig4_prior_decisions %>%
-  filter(prior_term %in% fig4_seed_terms, selected_representative, !is.na(RegionKey)) %>%
-  transmute(SeedLabel = prior_term, SeedRegionKey = RegionKey)
+fig4_seed_candidates <- purrr::map_dfr(fig4_seed_terms, function(seed_term) {
+  term_lower <- str_to_lower(seed_term)
+  candidates <- fig4_region_catalog %>%
+    filter(
+      Annotation_lower == term_lower |
+        Abbreviation_lower == term_lower |
+        str_detect(Annotation_lower, fixed(term_lower)) |
+        str_detect(Abbreviation_lower, fixed(term_lower))
+    ) %>%
+    left_join(fig4_effect_rank_region_summary %>% select(RegionKey, n_estimable_contrasts_total, max_abs_effect, min_raw_p), by = "RegionKey") %>%
+    mutate(
+      n_estimable_contrasts_total = coalesce(n_estimable_contrasts_total, 0),
+      max_abs_effect = coalesce(max_abs_effect, 0),
+      min_raw_p = coalesce(min_raw_p, Inf),
+      SeedLabel = seed_term
+    ) %>%
+    arrange(desc(n_estimable_contrasts_total), desc(max_abs_effect), min_raw_p, RegionKey)
+  if (nrow(candidates) == 0) {
+    tibble(SeedLabel = seed_term, SeedRegionKey = NA_character_, seed_selection_note = "not found")
+  } else {
+    candidates %>%
+      slice(1) %>%
+      transmute(SeedLabel, SeedRegionKey = RegionKey, seed_selection_note = "first data-matched seed candidate")
+  }
+}) %>%
+  filter(!is.na(SeedRegionKey))
 write_fig4_table(fig4_seed_candidates, "supp_exploratory_covariance_seed_matching", dir = fig4_supp_tab_dir)
+write_fig4_table(fig4_seed_candidates, "Covariance_seed_matching", dir = exploratory_covariance_dir)
 
 fig4_covariation_results <- tibble()
 if (nrow(fig4_seed_candidates) > 0) {
   sm_cell_fig4 <- make_sample_matrix(long, "Cell_Count")
   mat_cell_fig4 <- safe_log1p(sm_cell_fig4$mat)
   meta_cell_fig4 <- sm_cell_fig4$annotation %>% mutate(Condition = factor(as.character(Condition), levels = nature_condition_levels))
-  fig4_covariation_results <- purrr::pmap_dfr(fig4_seed_candidates, function(SeedLabel, SeedRegionKey) {
+  fig4_covariation_results <- purrr::pmap_dfr(
+    fig4_seed_candidates %>% select(SeedLabel, SeedRegionKey),
+    function(SeedLabel, SeedRegionKey) {
     purrr::map_dfr(nature_condition_levels, function(cond) {
       ids <- meta_cell_fig4 %>% filter(Condition == cond) %>% pull(SampleID)
       submat <- mat_cell_fig4[rownames(mat_cell_fig4) %in% ids, , drop = FALSE]
@@ -4364,14 +4794,17 @@ if (nrow(fig4_seed_candidates) > 0) {
         ungroup()
     })
   }) %>%
+    left_join(fig4_seed_candidates, by = c("SeedLabel", "SeedRegionKey")) %>%
     left_join(fig4_region_catalog %>% select(TargetRegionKey = RegionKey, TargetAnnotation = Annotation, TargetAbbreviation = Abbreviation, TargetClass = Class), by = "TargetRegionKey") %>%
     mutate(
       covariance_display = n_pair >= fig4_cov_min_n_pair & !is.na(rho),
       thresholded_covariance = covariance_display & abs(rho) >= fig4_cov_abs_r_cutoff & fdr <= fig4_cov_fdr_cutoff,
-      terminology_note = fig4_covariance_note
+      terminology_note = fig4_covariance_note,
+      fdr_scope = "BH within each seed and condition across tested target regions; exploratory"
     )
 }
 write_fig4_table(fig4_covariation_results, "supp_exploratory_seed_based_cfos_covariance", dir = fig4_supp_tab_dir)
+write_fig4_table(fig4_covariation_results, "Seed_based_cfos_cell_count_covariance", dir = exploratory_covariance_dir)
 
 fig4_cov_summary <- fig4_covariation_results %>%
   filter(!is.na(rho)) %>%
@@ -4386,6 +4819,8 @@ fig4_cov_summary <- fig4_covariation_results %>%
     .groups = "drop"
   )
 write_fig4_table(fig4_cov_summary, "supp_exploratory_cfos_covariance_summary", dir = fig4_supp_tab_dir)
+write_fig4_table(fig4_cov_summary %>% mutate(fdr_scope = "BH within each seed and condition across tested target regions; exploratory"),
+                 "Seed_based_cfos_cell_count_covariance_summary", dir = exploratory_covariance_dir)
 
 publication_output_index <- tibble(
   output_group = c(
@@ -4401,11 +4836,11 @@ publication_output_index <- tibble(
     fig4_tab_dir,
     fig4_supp_fig_dir,
     fig4_supp_tab_dir,
-    file.path(out_dir, "figures"),
-    file.path(out_dir, "tables")
+    legacy_fig_dir,
+    legacy_tab_dir
   ),
   recommended_use = c(
-    "Use first for Nature-style figure assembly; SVG/PDF are vector outputs and PNG is 600 dpi.",
+    "Use first for Fig. 4 assembly; SVG/PDF are vector outputs and PNG is 600 dpi.",
     "Use for source data, region selection documentation, contrast sign key, and QC tables tied to Fig. 4.",
     "Use as supplementary/exploratory displays for full effects, covariance heatmaps, CeM-seed covariance, and overlap summaries.",
     "Use as supplementary source tables; includes full edge lists, cell-count/intensity overlap, CeM rankings, and pairwise-n QC.",
@@ -4415,35 +4850,103 @@ publication_output_index <- tibble(
 )
 write_fig4_table(publication_output_index, "publication_output_index", dir = fig4_tab_dir)
 
+fig4_output_manifest <- tibble::tribble(
+  ~output_file, ~figure_panel, ~metric, ~analysis_type, ~normalization, ~imputation, ~contrast_definition, ~source_function, ~source_table, ~intended_use, ~exploratory_flag, ~fdr_scope,
+  file.path(fig4_fig_dir, "fig4B_projection_intensity_effect_size_map.svg"), "Fig4B", "Intensity", "regional effect-size heatmap", "none", "none for displayed effects; limma model used median imputation internally", paste(fig4_main_contrasts, collapse = "; "), "make_fig4_heatmap", file.path(publication_source_tab_dir, "Fig4B_projection_effect_sizes.csv"), "main publication effect-size map", FALSE, "FDR values are global within contrast/metric tables; heatmap inclusion is not significance based",
+  file.path(fig4_fig_dir, "fig4C_cfos_cell_count_effect_size_map.svg"), "Fig4C", "Cell_Count", "regional effect-size heatmap", "none", "none for displayed effects; limma model used median imputation internally", paste(fig4_main_contrasts, collapse = "; "), "make_fig4_heatmap", file.path(publication_source_tab_dir, "Fig4C_cfos_cell_count_effect_sizes.csv"), "main publication effect-size map", FALSE, "FDR values are global within contrast/metric tables; heatmap inclusion is not significance based",
+  file.path(fig4_fig_dir, "fig4D_key_region_condition_profiles.svg"), "Fig4D", "Cell_Count; Intensity", "raw condition profiles", "none", "none", "condition-level descriptive profiles", "fig4D_source block", file.path(fig4_tab_dir, "fig4_panelD_key_region_profiles.csv"), "main publication descriptive profiles", FALSE, "not applicable",
+  file.path(fig4_fig_dir, "fig4E_cfos_cell_count_projection_dissociation.svg"), "Fig4E", "Cell_Count; Intensity", "paired effect-size scatter", "none", "none for displayed effects; limma model used median imputation internally", "Learning_effect", "fig4E_source block", file.path(fig4_tab_dir, "fig4_panelE_cfos_cell_count_projection_scatter.csv"), "main publication descriptive effect comparison", FALSE, "FDR values are global within contrast/metric tables; panel is descriptive",
+  file.path(fig4_fig_dir, "fig4F_systems_level_pca.svg"), "Fig4F", "Cell_Count; Intensity", "descriptive PCA", "none", "region-median feature imputation for PCA only", "animal-level structure, no contrast test", "make_fig4_pca", file.path(fig4_tab_dir, "fig4_panelF_pca_coordinates.csv"), "descriptive animal-level structure only", FALSE, "not applicable",
+  file.path(exploratory_covariance_dir, "SuppFig4_condition_covariance_Cell_Count.csv"), "Supplementary", "Cell_Count", "condition covariance", "none", "none", "within-condition Spearman covariance", "make_condition_correlation_outputs", file.path(exploratory_covariance_dir, "SuppFig4_condition_covariance_Cell_Count.csv"), "supplementary exploratory covariance", TRUE, "BH within each condition-specific covariance matrix; exploratory",
+  file.path(exploratory_covariance_dir, "CeM_seed_covariance_Cell_Count.csv"), "Supplementary", "Cell_Count", "CeM seed covariance", "none", "none", "within-condition Spearman covariance with CeM seed", "make_cem_seed_covariance", file.path(exploratory_covariance_dir, "CeM_seed_covariance_Cell_Count.csv"), "supplementary exploratory covariance", TRUE, "BH within each condition for CeM seed versus all estimable target regions; exploratory",
+  file.path(exploratory_sensitivity_dir, "Sensitivity_stability_raw_normalized_complete_case_imputed.csv"), "QC/Sensitivity", "Cell_Count; Intensity", "stability comparison", "raw and normalized log1p", "complete-case and median-imputed limma variants", paste(fig4_main_contrasts, collapse = "; "), "run_fig4_complete_case_contrasts", file.path(exploratory_sensitivity_dir, "Sensitivity_stability_raw_normalized_complete_case_imputed.csv"), "sensitivity and robustness audit", TRUE, "FDR values inherited from each variant's contrast/metric scope"
+)
+readr::write_csv(fig4_output_manifest, file.path(publication_manifest_dir, "output_manifest.csv"))
+
 fig4_readme <- c(
   "Manuscript-ready Fig. 4 generation",
   "",
   paste0("Input data used: ", paste(sort(unique(long$SourceFile)), collapse = "; ")),
-  "Final main figure: fig4_main_learning_stress_activity_projection_final.svg/pdf/png.",
-  "Publication-first outputs are organized under figures/fig4_manuscript_matched, tables/fig4_manuscript_matched, figures/fig4_supplementary_exploratory, and tables/fig4_supplementary_exploratory.",
-  "Main panels: A condition/contrast key, B projection intensity effects, C cFos+ cell-count effects, D raw key-region profiles, E activity-projection dissociation, F descriptive animal-level PCA.",
+  "Main Fig. 4 output: Fig4_learning_stress_cfos_cell_count_projection.svg/pdf/png.",
+  "Publication outputs are organized under results/01_publication; exploratory covariance, network, dimensionality-reduction, and sensitivity outputs are under results/02_exploratory; QC outputs are under results/03_qc.",
+  "Main panels: A condition/contrast key, B projection intensity effects, C cFos+ cell-count effects, D raw key-region profiles, E cFos cell-count/projection dissociation, F descriptive animal-level PCA.",
   "Central contrasts visualized:",
   paste0("- ", fig4_sign_key$contrast, ": ", fig4_sign_key$contrast_formula, "; positive = ", fig4_sign_key$positive_logFC_means),
   "",
-  "Effect maps use raw log1p values by default. Normalized log1p analyses are exported for comparison.",
-  "Missing effect-map cells are retained as NA and rendered grey; no missing values are imputed for manuscript-facing effect maps.",
-  "Region selection uses manuscript priority first, then estimable central contrasts, effect magnitude, and raw P value only as a secondary tie-breaker.",
+  "Transformation: log1p. Main effect maps use raw, non-normalized values by default. Normalized log1p analyses are exported for comparison.",
+  "Imputation: main heatmap source tables retain NA displayed effects; grey heatmap tiles mean missing, non-estimable, insufficient n, or excluded from main display. Median-imputed limma results are retained as one model variant and are not the only sensitivity result.",
+  paste0("Region inclusion: no manuscript-prioritized anatomy is used for main Fig. 4 selection. Regions require min relevant group n >= 2 for displayed contrasts and >= ", fig4_min_main_non_na_display, " displayed central effects within a metric; each heatmap then shows the top ", fig4_max_heatmap_regions, " regions ranked by maximum absolute displayed logFC. Raw P is not used as a main-display inclusion rule."),
+  "Main Fig. 4 heatmaps are regional effect-size maps, not whole-brain discovery significance maps.",
+  "Nominal P-values are exploratory unless FDR survives the stated correction scope. Low-n effects are marked and should be interpreted as exploratory.",
   "Projection intensity and regional cFos recruitment are treated as related but distinct readouts; no causal relation is implied.",
-  "Network edge comparisons use VEH_unpaired as the explicit baseline condition.",
+  "Network edge comparisons use VEH_unpaired as the explicit baseline condition and are exploratory.",
   "Supplementary cell-count/intensity edge-overlap tables and plots identify thresholded region pairs shared by both readouts.",
   "CeM-seed covariance tables test CeM against all detected target regions; plots show the strongest estimable targets for readability.",
-  "Supplementary condition-specific inter-regional covariance heatmaps and CeM-seed covariance analyses are exploratory outputs and are not interpreted as anatomical connectivity, functional connectivity, causality, or rewiring.",
+  "Supplementary condition-specific inter-regional covariance heatmaps, CeM-seed covariance, and network analyses are exploratory Spearman covariance analyses. They are not anatomical connectivity, functional connectivity, causality, or literal rewiring.",
+  paste0("FDR scope: see explicit fdr_scope columns and manifest at ", file.path(publication_manifest_dir, "output_manifest.csv"), "."),
+  paste0("Session info: ", file.path(session_info_dir, "session_info.txt"), "."),
   "",
   "Skipped panels or warnings:",
   if (length(fig4_skipped_panels) == 0) "- None" else paste0("- ", fig4_skipped_panels)
 )
-writeLines(fig4_readme, con = file.path(fig4_tab_dir, "README_fig4_manuscript_matched.txt"))
-writeLines(fig4_readme, con = file.path(fig4_fig_dir, "README_fig4_manuscript_matched.txt"))
+writeLines(fig4_readme, con = file.path(fig4_tab_dir, "README_Fig4_publication.txt"))
+writeLines(fig4_readme, con = file.path(fig4_fig_dir, "README_Fig4_publication.txt"))
+
+sync_legacy_outputs <- function() {
+  copy_nonrecursive <- function(from_dir, to_dir) {
+    if (!dir.exists(from_dir)) return(invisible(NULL))
+    dir.create(to_dir, recursive = TRUE, showWarnings = FALSE)
+    files <- list.files(from_dir, full.names = TRUE, recursive = FALSE)
+    files <- files[file.exists(files) & !dir.exists(files)]
+    if (length(files) > 0) {
+      file.copy(files, file.path(to_dir, basename(files)), overwrite = TRUE)
+    }
+    invisible(NULL)
+  }
+  copy_nonrecursive(file.path(out_dir, "figures"), legacy_fig_dir)
+  copy_nonrecursive(file.path(out_dir, "tables"), legacy_tab_dir)
+}
+sync_legacy_outputs()
+
+output_directory_audit <- tibble(
+  output_directory = c(
+    publication_fig4_fig_dir,
+    publication_supp_fig_dir,
+    publication_dashboard_fig_dir,
+    publication_fig4_tab_dir,
+    publication_supp_tab_dir,
+    publication_source_tab_dir,
+    publication_manifest_dir,
+    exploratory_covariance_dir,
+    exploratory_network_dir,
+    exploratory_dimred_dir,
+    exploratory_sensitivity_dir,
+    qc_missingness_dir,
+    qc_normalization_dir,
+    qc_region_selection_dir,
+    qc_covariance_dir,
+    legacy_fig_dir,
+    legacy_tab_dir,
+    session_info_dir
+  )
+) %>%
+  mutate(
+    n_files = purrr::map_int(output_directory, ~ if (dir.exists(.x)) length(list.files(.x, recursive = TRUE, all.files = FALSE)) else 0L),
+    note = case_when(
+      n_files > 0 ~ "populated",
+      output_directory == publication_dashboard_fig_dir ~ "empty unless dashboard exports are enabled/generated",
+      TRUE ~ "empty; upstream analysis may have skipped this output family"
+    )
+  )
+readr::write_csv(output_directory_audit, file.path(publication_manifest_dir, "output_directory_audit.csv"))
 
 # -----------------------------
 # 16. Save session info
 # -----------------------------
 sink(file.path(out_dir, "session_info.txt"))
+print(sessionInfo())
+sink()
+sink(file.path(session_info_dir, "session_info.txt"))
 print(sessionInfo())
 sink()
 
