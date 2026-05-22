@@ -29,8 +29,8 @@ invisible(lapply(packages, library, character.only = TRUE))
 # -----------------------------
 input_dir <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/Results Final tracing"
 input_file <- file.path(input_dir, "FINAL.csv")
-intensity_raw_file <- file.path(input_dir, "raw_input_normalized", "IntensityNoOutliersFin_normalized.xlsx")
-cell_count_raw_file <- file.path(input_dir, "raw_input_normalized", "CellCountNoOutliersFin_normalized.csv")
+intensity_raw_file <- file.path(input_dir, "IntensityNoOutliersFin.xlsx")
+cell_count_raw_file <- file.path(input_dir, "CellCountNoOutliersFin.csv")
 
 out_dir <- file.path(dirname(input_file), "region_analysis_outputs_individual_level")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
@@ -164,10 +164,6 @@ read_raw_metric_file <- function(path, metric_col) {
     stop("Unsupported raw metric file type for ", path, ". Expected .xlsx or .csv.")
   ) %>%
     janitor::clean_names()
-
-  names(x) <- stringr::str_replace_all(names(x), "^abbrev$", "abbreviation")
-  names(x) <- stringr::str_replace_all(names(x), "^abbr$", "abbreviation")
-  names(x) <- stringr::str_replace_all(names(x), "^cellcount$", "cell_count")
 
   required <- c("annotation", metric_col, "group", "abbreviation", "class", "sample_id")
   missing_cols <- setdiff(required, names(x))
@@ -432,57 +428,6 @@ QC_region_level_availability <- region_condition_missingness_qc %>%
     passes_interaction_filter, passes_main_display_filter
   )
 
-QC_region_level_availability_by_metric <- region_condition_missingness_qc %>%
-  select(
-    RegionKey, Annotation, Abbreviation, Class, Level, Condition,
-    n_samples_total, n_cell_count, n_intensity,
-    missing_cell_count, missing_intensity
-  ) %>%
-  pivot_wider(
-    names_from = Condition,
-    values_from = c(n_samples_total, n_cell_count, n_intensity, missing_cell_count, missing_intensity),
-    values_fill = 0
-  ) %>%
-  mutate(
-    total_n_cell_count =
-      n_cell_count_VEH_paired + n_cell_count_VEH_unpaired +
-      n_cell_count_CNO_paired + n_cell_count_CNO_unpaired,
-    total_n_intensity =
-      n_intensity_VEH_paired + n_intensity_VEH_unpaired +
-      n_intensity_CNO_paired + n_intensity_CNO_unpaired,
-    min_n_cell_count_per_group = pmin(
-      n_cell_count_VEH_paired, n_cell_count_VEH_unpaired,
-      n_cell_count_CNO_paired, n_cell_count_CNO_unpaired
-    ),
-    min_n_intensity_per_group = pmin(
-      n_intensity_VEH_paired, n_intensity_VEH_unpaired,
-      n_intensity_CNO_paired, n_intensity_CNO_unpaired
-    ),
-    availability_note =
-      "Metric-specific companion to QC_region_level_availability; the main availability table uses pmax(n_cell_count, n_intensity) for n_present_any."
-  )
-
-safe_write_csv <- function(x, path) {
-  tryCatch(
-    readr::write_csv(x, path),
-    error = function(e) warning("Could not write CSV: ", path, " | ", conditionMessage(e), call. = FALSE)
-  )
-}
-
-safe_write_tsv <- function(x, path) {
-  tryCatch(
-    readr::write_tsv(x, path),
-    error = function(e) warning("Could not write TSV: ", path, " | ", conditionMessage(e), call. = FALSE)
-  )
-}
-
-safe_write_xlsx <- function(x, path) {
-  tryCatch(
-    openxlsx::write.xlsx(x, path, overwrite = TRUE),
-    error = function(e) warning("Could not write XLSX: ", path, " | ", conditionMessage(e), call. = FALSE)
-  )
-}
-
 minimum_n_filter_qc <- region_condition_missingness_qc %>%
   transmute(
     Class, Annotation, Abbreviation, Level, RegionLabel, RegionKey, Condition,
@@ -498,7 +443,6 @@ openxlsx::write.xlsx(
     animal_coverage_signal = QC_animal_level_coverage_signal,
     region_condition_missingness = region_condition_missingness_qc,
     region_level_availability = QC_region_level_availability,
-    region_avail_by_metric = QC_region_level_availability_by_metric,
     minimum_n_filter = minimum_n_filter_qc
   ),
   file.path(out_dir, "tables", "animal_region_qc_tables.xlsx"),
@@ -511,33 +455,17 @@ openxlsx::write.xlsx(
     animal_coverage_signal = QC_animal_level_coverage_signal,
     region_condition_missingness = region_condition_missingness_qc,
     region_level_availability = QC_region_level_availability,
-    region_avail_by_metric = QC_region_level_availability_by_metric,
     minimum_n_filter = minimum_n_filter_qc
   ),
   file.path(legacy_tab_dir, "animal_region_qc_tables.xlsx"),
   overwrite = TRUE
 )
 readr::write_csv(QC_animal_level_coverage_signal, file.path(out_dir, "tables", "QC_animal_level_coverage_signal.csv"))
-safe_write_csv(QC_region_level_availability, file.path(out_dir, "tables", "QC_region_level_availability.csv"))
-safe_write_tsv(QC_region_level_availability, file.path(out_dir, "tables", "QC_region_level_availability.tsv"))
-safe_write_xlsx(QC_region_level_availability, file.path(out_dir, "tables", "QC_region_level_availability.xlsx"))
-safe_write_csv(QC_region_level_availability_by_metric, file.path(out_dir, "tables", "QC_region_level_availability_by_metric.csv"))
-safe_write_tsv(QC_region_level_availability_by_metric, file.path(out_dir, "tables", "QC_region_level_availability_by_metric.tsv"))
-safe_write_xlsx(QC_region_level_availability_by_metric, file.path(out_dir, "tables", "QC_region_level_availability_by_metric.xlsx"))
+readr::write_csv(QC_region_level_availability, file.path(out_dir, "tables", "QC_region_level_availability.csv"))
 readr::write_csv(QC_animal_level_coverage_signal, file.path(legacy_tab_dir, "QC_animal_level_coverage_signal.csv"))
-safe_write_csv(QC_region_level_availability, file.path(legacy_tab_dir, "QC_region_level_availability.csv"))
-safe_write_tsv(QC_region_level_availability, file.path(legacy_tab_dir, "QC_region_level_availability.tsv"))
-safe_write_xlsx(QC_region_level_availability, file.path(legacy_tab_dir, "QC_region_level_availability.xlsx"))
-safe_write_csv(QC_region_level_availability_by_metric, file.path(legacy_tab_dir, "QC_region_level_availability_by_metric.csv"))
-safe_write_tsv(QC_region_level_availability_by_metric, file.path(legacy_tab_dir, "QC_region_level_availability_by_metric.tsv"))
-safe_write_xlsx(QC_region_level_availability_by_metric, file.path(legacy_tab_dir, "QC_region_level_availability_by_metric.xlsx"))
+readr::write_csv(QC_region_level_availability, file.path(legacy_tab_dir, "QC_region_level_availability.csv"))
 readr::write_csv(QC_animal_level_coverage_signal, file.path(qc_missingness_dir, "QC_animal_level_coverage_signal.csv"))
-safe_write_csv(QC_region_level_availability, file.path(qc_missingness_dir, "QC_region_level_availability.csv"))
-safe_write_tsv(QC_region_level_availability, file.path(qc_missingness_dir, "QC_region_level_availability.tsv"))
-safe_write_xlsx(QC_region_level_availability, file.path(qc_missingness_dir, "QC_region_level_availability.xlsx"))
-safe_write_csv(QC_region_level_availability_by_metric, file.path(qc_missingness_dir, "QC_region_level_availability_by_metric.csv"))
-safe_write_tsv(QC_region_level_availability_by_metric, file.path(qc_missingness_dir, "QC_region_level_availability_by_metric.tsv"))
-safe_write_xlsx(QC_region_level_availability_by_metric, file.path(qc_missingness_dir, "QC_region_level_availability_by_metric.xlsx"))
+readr::write_csv(QC_region_level_availability, file.path(qc_missingness_dir, "QC_region_level_availability.csv"))
 readr::write_csv(region_condition_missingness_qc, file.path(qc_missingness_dir, "QC_region_condition_missingness_by_metric.csv"))
 
 qc_condition_plot_labels <- c(

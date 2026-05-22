@@ -76,6 +76,7 @@ is_bad_class <- function(x) {
   x_low <- stringr::str_to_lower(clean_chr(x))
   is.na(x_low) |
     x_low %in% c("unknown", "na", "nan", "null", "cortic", "cortical") |
+    stringr::str_detect(x_low, "^(cortica|hypothala|striat|pallid|thalam|midbrain|hindbrain|cerebell)") |
     stringr::str_length(x_low) < 5
 }
 
@@ -131,6 +132,7 @@ standardize_region_columns <- function(x, source_file, file_role) {
       abbreviation = clean_chr(abbreviation),
       class = clean_chr(class),
       level = suppressWarnings(as.integer(level)),
+      .annotation_code_clean = clean_abbrev(annotation),
       .abbreviation_clean = clean_abbrev(abbreviation),
       .annotation_clean = stringr::str_to_lower(clean_chr(annotation)),
       .metadata_score_before = metadata_quality_score(annotation, class, level)
@@ -158,15 +160,15 @@ read_metadata_reference_file <- function(path) {
     select(
       .source_file, .file_role,
       annotation, abbreviation, class, level,
-      .abbreviation_clean, .annotation_clean, .metadata_score_before
+      .annotation_code_clean, .abbreviation_clean, .annotation_clean, .metadata_score_before
     ) %>%
     distinct()
 }
 
 make_canonical_reference <- function(combined_metadata) {
   candidates <- combined_metadata %>%
-    filter(!is.na(.abbreviation_clean), .abbreviation_clean != "") %>%
-    group_by(.abbreviation_clean, annotation, abbreviation, class, level) %>%
+    filter(!is.na(.annotation_code_clean), .annotation_code_clean != "") %>%
+    group_by(.annotation_code_clean, annotation, abbreviation, class, level) %>%
     summarise(
       n_rows = n(),
       n_files = n_distinct(.source_file),
@@ -181,12 +183,12 @@ make_canonical_reference <- function(combined_metadata) {
     )
 
   canonical <- candidates %>%
-    arrange(.abbreviation_clean, desc(total_score), desc(n_rows), desc(score)) %>%
-    group_by(.abbreviation_clean) %>%
+    arrange(.annotation_code_clean, desc(total_score), desc(n_rows), desc(score)) %>%
+    group_by(.annotation_code_clean) %>%
     slice(1) %>%
     ungroup() %>%
     transmute(
-      .abbreviation_clean,
+      .annotation_code_clean,
       canonical_annotation = annotation,
       canonical_abbreviation = abbreviation,
       canonical_class = class,
@@ -199,21 +201,21 @@ make_canonical_reference <- function(combined_metadata) {
     )
 
   ambiguous <- candidates %>%
-    group_by(.abbreviation_clean) %>%
+    group_by(.annotation_code_clean) %>%
     mutate(
       n_candidate_metadata_rows = n(),
       best_total_score = max(total_score, na.rm = TRUE)
     ) %>%
     ungroup() %>%
     filter(n_candidate_metadata_rows > 1) %>%
-    arrange(.abbreviation_clean, desc(total_score), desc(n_rows))
+    arrange(.annotation_code_clean, desc(total_score), desc(n_rows))
 
   list(canonical = canonical, ambiguous = ambiguous)
 }
 
 normalize_region_metadata <- function(raw_df, canonical_ref) {
   out <- raw_df %>%
-    left_join(canonical_ref, by = ".abbreviation_clean") %>%
+    left_join(canonical_ref, by = ".annotation_code_clean") %>%
     mutate(
       .class_before = class,
       .annotation_before = annotation,
@@ -285,6 +287,7 @@ write_normalized_outputs <- function(cell_norm, intensity_norm, canonical_ref, a
     transmute(
       source_file = .source_file,
       file_role = .file_role,
+      annotation_code_clean = .annotation_code_clean,
       abbreviation_clean = .abbreviation_clean,
       annotation,
       abbreviation,
@@ -300,6 +303,8 @@ write_normalized_outputs <- function(cell_norm, intensity_norm, canonical_ref, a
   readr::write_csv(canonical_ref, file.path(out_dir, "QC_abbreviation_canonical_reference.csv"))
   readr::write_csv(ambiguous_ref, file.path(out_dir, "QC_abbreviation_ambiguous_candidates.csv"))
   readr::write_csv(missing_after, file.path(out_dir, "QC_missing_metadata_after_normalization.csv"))
+  readr::write_tsv(missing_after, file.path(out_dir, "QC_missing_metadata_after_normalization.tsv"))
+  openxlsx::write.xlsx(missing_after, file.path(out_dir, "QC_missing_metadata_after_normalization.xlsx"), overwrite = TRUE)
 
   drop_internal <- function(x) {
     x %>% select(-starts_with("."), -starts_with("canonical_"))
