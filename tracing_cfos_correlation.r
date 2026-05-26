@@ -112,6 +112,15 @@ central_contrasts <- c(
 min_pairwise_n <- 3
 network_abs_r_cutoff <- 0.70
 network_fdr_cutoff <- 0.10
+covariance_mode <- "pooled_raw"
+supported_covariance_modes <- c("pooled_raw", "residualized_by_condition", "per_condition")
+if (!covariance_mode %in% supported_covariance_modes) {
+  stop("Unsupported covariance_mode: ", covariance_mode)
+}
+# TODO: Add covariance_mode == "residualized_by_condition" by correlating
+# per-region residuals from log1p(metric) ~ Condition.
+# TODO: Add covariance_mode == "per_condition" by running the covariance/network
+# workflow separately within each condition when pairwise n is sufficient.
 
 # -----------------------------
 # 2. Readers for merged FINAL.csv or raw no-outlier Excel files
@@ -421,7 +430,9 @@ QC_region_level_availability <- region_condition_missingness_qc %>%
     passes_CNO_learning_filter = n_CNO_paired >= 2 & n_VEH_paired >= 2,
     passes_CNO_stress_filter = n_CNO_unpaired >= 2 & n_VEH_unpaired >= 2,
     passes_interaction_filter = n_VEH_paired >= 2 & n_VEH_unpaired >= 2 & n_CNO_paired >= 2 & n_CNO_unpaired >= 2,
-    passes_main_display_filter = passes_learning_effect_filter | passes_CNO_learning_filter | passes_CNO_stress_filter | passes_interaction_filter
+    passes_main_display_filter = passes_learning_effect_filter | passes_CNO_learning_filter | passes_CNO_stress_filter | passes_interaction_filter,
+    availability_note =
+      "This table is any-metric region-level contrast/display availability using pmax(n_cell_count, n_intensity) and n >= 2. It does not determine correlation heatmap or network inclusion."
   ) %>%
   select(
     RegionKey, Annotation, Abbreviation, Class, Level,
@@ -429,7 +440,7 @@ QC_region_level_availability <- region_condition_missingness_qc %>%
     missing_VEH_paired, missing_VEH_unpaired, missing_CNO_paired, missing_CNO_unpaired,
     total_n_present, min_n_per_group, n_groups_present,
     passes_learning_effect_filter, passes_CNO_learning_filter, passes_CNO_stress_filter,
-    passes_interaction_filter, passes_main_display_filter
+    passes_interaction_filter, passes_main_display_filter, availability_note
   )
 
 QC_region_level_availability_by_metric <- region_condition_missingness_qc %>%
@@ -626,10 +637,21 @@ qc_sample_summary <- long %>%
     .groups = "drop"
   )
 
-qc_region_availability <- long %>%
-  group_by(Class, Annotation, Abbreviation, RegionLabel, RegionKey, Condition) %>%
-  summarise(n_samples_present = n_distinct(SampleID), .groups = "drop") %>%
-  pivot_wider(names_from = Condition, values_from = n_samples_present, values_fill = 0) %>%
+qc_region_availability <- region_condition_missingness_qc %>%
+  transmute(
+    Class, Annotation, Abbreviation, RegionLabel, RegionKey, Condition,
+    n_samples_present = pmax(n_cell_count, n_intensity),
+    n_cell_count_present = n_cell_count,
+    n_intensity_present = n_intensity,
+    availability_note =
+      "Availability requires explicit non-missing Cell_Count or Intensity values; row presence alone is not counted."
+  ) %>%
+  pivot_wider(
+    names_from = Condition,
+    values_from = c(n_samples_present, n_cell_count_present, n_intensity_present),
+    values_fill = 0
+  ) %>%
+  rename_with(~ str_remove(.x, "^n_samples_present_"), starts_with("n_samples_present_")) %>%
   mutate(
     n_conditions_present = rowSums(across(all_of(levels(long$Condition)), ~ .x > 0)),
     complete_all_conditions = n_conditions_present == length(levels(long$Condition))
@@ -896,6 +918,8 @@ make_sample_matrix <- function(data, metric, class_filter = NULL, complete_regio
   list(mat = as.matrix(mat_numeric), annotation = sample_anno)
 }
 
+# Helper for supplementary condition-specific covariance displays below. This is
+# not used by the active pooled heatmap/network workflow.
 prune_regions_by_pairwise_overlap <- function(data, metric, region_keys,
                                               min_pairwise_n = 3,
                                               conditions = nature_condition_levels) {
@@ -1012,12 +1036,18 @@ cor_with_p <- function(mat, min_n = 3) {
       n_pair = sum(complete.cases(mat[, region1], mat[, region2])),
       r = ifelse(
         n_pair >= min_n,
-        suppressWarnings(cor(mat[, region1], mat[, region2], use = "pairwise.complete.obs", method = "spearman")),
+        suppressWarnings(tryCatch(
+          cor(mat[, region1], mat[, region2], use = "pairwise.complete.obs", method = "spearman"),
+          error = function(e) NA_real_
+        )),
         NA_real_
       ),
       p = ifelse(
         n_pair >= min_n && !is.na(r) && region1 != region2,
-        suppressWarnings(cor.test(mat[, region1], mat[, region2], method = "spearman", exact = FALSE)$p.value),
+        suppressWarnings(tryCatch(
+          cor.test(mat[, region1], mat[, region2], method = "spearman", exact = FALSE)$p.value,
+          error = function(e) NA_real_
+        )),
         NA_real_
       )
     ) %>%
@@ -1031,19 +1061,128 @@ pairwise_complete_n_matrix <- function(mat) {
   crossprod(observed)
 }
 
+spearman_cor_matrix <- function(mat) {
+  mat <- as.matrix(mat)
+  if (ncol(mat) == 0) {
+    return(matrix(numeric(), nrow = 0, ncol = 0))
+  }
+  if (ncol(mat) == 1) {
+    return(matrix(1, nrow = 1, ncol = 1, dimnames = list(colnames(mat), colnames(mat))))
+  }
+  suppressWarnings(cor(mat, use = "pairwise.complete.obs", method = "spearman"))
+}
+
+get_region_metadata <- function(region_keys) {
+  long %>%
+    filter(RegionKey %in% region_keys) %>%
+    distinct(RegionKey, Annotation, Abbreviation, Class, Level) %>%
+    group_by(RegionKey) %>%
+    summarise(
+      Annotation = dplyr::first(Annotation),
+      Abbreviation = dplyr::first(Abbreviation),
+      Class = dplyr::first(Class),
+      Level = {
+        level_values <- Level[!is.na(Level)]
+        if (length(level_values) == 0) NA_integer_ else level_values[[1]]
+      },
+      .groups = "drop"
+    )
+}
+
+class_filter_label <- function(class_filter) {
+  if (is.null(class_filter)) "all_classes" else class_filter
+}
+
+make_covariance_pairwise_qc <- function(mat_filtered, metric, class_filter, title_suffix,
+                                        min_pairwise_n = 3,
+                                        abs_r_cutoff = network_abs_r_cutoff,
+                                        fdr_cutoff = network_fdr_cutoff) {
+  empty <- tibble(
+    Metric = character(),
+    covariance_mode = character(),
+    class_filter = character(),
+    title_suffix = character(),
+    region1 = character(),
+    region2 = character(),
+    n_pair = integer(),
+    r = double(),
+    p = double(),
+    fdr = double(),
+    passes_pairwise_n = logical(),
+    passes_abs_r = logical(),
+    passes_fdr = logical(),
+    retained_edge = logical()
+  )
+
+  if (ncol(mat_filtered) < 2) return(empty)
+
+  cor_with_p(mat_filtered, min_n = min_pairwise_n) %>%
+    filter(region1 < region2) %>%
+    mutate(
+      Metric = metric,
+      covariance_mode = covariance_mode,
+      class_filter = class_filter_label(class_filter),
+      title_suffix = title_suffix,
+      passes_pairwise_n = n_pair >= min_pairwise_n,
+      passes_abs_r = !is.na(r) & abs(r) >= abs_r_cutoff,
+      passes_fdr = !is.na(fdr) & fdr <= fdr_cutoff,
+      retained_edge = passes_pairwise_n & passes_abs_r & passes_fdr
+    ) %>%
+    select(
+      Metric, covariance_mode, class_filter, title_suffix,
+      region1, region2, n_pair, r, p, fdr,
+      passes_pairwise_n, passes_abs_r, passes_fdr, retained_edge
+    )
+}
+
+write_covariance_network_summary <- function(region_qc, pairwise_qc, metric, class_filter, title_suffix) {
+  summary_df <- tibble(
+    Metric = metric,
+    covariance_mode = covariance_mode,
+    class_filter = class_filter_label(class_filter),
+    title_suffix = title_suffix,
+    min_pairwise_n = min_pairwise_n,
+    network_abs_r_cutoff = network_abs_r_cutoff,
+    network_fdr_cutoff = network_fdr_cutoff,
+    n_regions_raw = nrow(region_qc),
+    n_regions_after_nonmissing_variance_filter = sum(region_qc$passes_covariance_region_filter, na.rm = TRUE),
+    n_possible_pairs = if (nrow(pairwise_qc) == 0) 0L else nrow(pairwise_qc),
+    n_pairs_with_pairwise_n_ge_min = sum(pairwise_qc$passes_pairwise_n, na.rm = TRUE),
+    n_pairs_with_abs_r_ge_cutoff = sum(pairwise_qc$passes_abs_r, na.rm = TRUE),
+    n_pairs_with_fdr_le_cutoff = sum(pairwise_qc$passes_fdr, na.rm = TRUE),
+    n_edges_retained = sum(pairwise_qc$retained_edge, na.rm = TRUE)
+  )
+
+  readr::write_csv(
+    summary_df,
+    file.path(qc_covariance_dir, paste0("Covariance_network_summary_", metric, "_", title_suffix, ".csv"))
+  )
+  readr::write_csv(
+    summary_df,
+    file.path(exploratory_network_dir, paste0("Network_QC_summary_", metric, "_", title_suffix, ".csv"))
+  )
+
+  invisible(summary_df)
+}
+
 write_correlation_heatmap_qc <- function(mat_before, mat_after, cor_mat, n_pair_mat,
-                                         metric, title_suffix,
+                                         metric, class_filter, title_suffix,
                                          min_pairwise_n = 3) {
   region_qc <- tibble(
     RegionKey = colnames(mat_before),
-    n_nonmissing = colSums(is.finite(mat_before)),
-    sd = apply(mat_before, 2, function(x) stats::sd(x, na.rm = TRUE))
+    n_nonmissing_overall = colSums(is.finite(mat_before)),
+    sd_log1p = apply(mat_before, 2, function(x) stats::sd(x, na.rm = TRUE))
   ) %>%
     mutate(
-      sd = if_else(is.finite(sd), sd, NA_real_),
-      passes_n = n_nonmissing >= min_pairwise_n,
-      passes_variance = !is.na(sd) & sd > 0,
-      passes_heatmap_filter = passes_n & passes_variance,
+      Metric = metric,
+      covariance_mode = covariance_mode,
+      class_filter = class_filter_label(class_filter),
+      title_suffix = title_suffix,
+      sd_log1p = if_else(is.finite(sd_log1p), sd_log1p, NA_real_),
+      passes_n = n_nonmissing_overall >= min_pairwise_n,
+      passes_variance = !is.na(sd_log1p) & sd_log1p > 0,
+      passes_covariance_region_filter = passes_n & passes_variance,
+      passes_heatmap_filter = passes_covariance_region_filter,
       n_regions_before_filter = ncol(mat_before),
       n_regions_after_filter = ncol(mat_after)
     )
@@ -1088,12 +1227,26 @@ write_correlation_heatmap_qc <- function(mat_before, mat_after, cor_mat, n_pair_
   }
 
   region_qc <- region_qc %>%
+    left_join(get_region_metadata(colnames(mat_before)), by = "RegionKey") %>%
     left_join(pairwise_summary, by = "RegionKey") %>%
-    arrange(desc(passes_heatmap_filter), RegionKey)
+    select(
+      Metric, covariance_mode, class_filter, title_suffix,
+      RegionKey, Annotation, Abbreviation, Class, Level,
+      n_nonmissing_overall, sd_log1p, passes_covariance_region_filter,
+      n_pairwise_regions_with_n_ge_min, prop_pairwise_regions_with_n_ge_min,
+      min_pairwise_n_observed, n_estimable_correlations,
+      prop_estimable_correlations, passes_n, passes_variance,
+      n_regions_before_filter, n_regions_after_filter, passes_heatmap_filter
+    ) %>%
+    arrange(desc(passes_covariance_region_filter), RegionKey)
 
   readr::write_csv(
     region_qc,
     file.path(qc_covariance_dir, paste0("Correlation_heatmap_region_qc_", metric, "_", title_suffix, ".csv"))
+  )
+  readr::write_csv(
+    region_qc,
+    file.path(qc_covariance_dir, paste0("Covariance_region_qc_", metric, "_", title_suffix, ".csv"))
   )
   readr::write_csv(
     n_pair_out,
@@ -1122,7 +1275,7 @@ plot_correlation_heatmap <- function(mat, metric, class_filter = NULL) {
 
   if (ncol(mat) > 0) {
     n_pair_mat <- pairwise_complete_n_matrix(mat)
-    cor_mat <- suppressWarnings(cor(mat, use = "pairwise.complete.obs", method = "spearman"))
+    cor_mat <- spearman_cor_matrix(mat)
     cor_mat[n_pair_mat < min_pairwise_n] <- NA_real_
     cor_mat[!is.finite(cor_mat)] <- NA_real_
     diag(cor_mat) <- 1
@@ -1137,6 +1290,7 @@ plot_correlation_heatmap <- function(mat, metric, class_filter = NULL) {
     cor_mat = cor_mat,
     n_pair_mat = n_pair_mat,
     metric = metric,
+    class_filter = class_filter,
     title_suffix = title_suffix,
     min_pairwise_n = min_pairwise_n
   )
@@ -1155,7 +1309,7 @@ plot_correlation_heatmap <- function(mat, metric, class_filter = NULL) {
     color = colorRampPalette(rev(RColorBrewer::brewer.pal(11, "RdBu")))(100),
     breaks = seq(-1, 1, length.out = 101),
     na_col = "grey88",
-    main = paste0("Spearman region-region correlation: ", metric, " | ", title_suffix, " (grey = not estimable)"),
+    main = paste0("Spearman region-region correlation: ", metric, " | ", title_suffix, " | ", covariance_mode, " pooled across all conditions (grey = not estimable)"),
     fontsize_row = ifelse(ncol(cor_mat) > 80, 3, 6),
     fontsize_col = ifelse(ncol(cor_mat) > 80, 3, 6),
     border_color = NA
@@ -1166,7 +1320,7 @@ plot_correlation_heatmap <- function(mat, metric, class_filter = NULL) {
   safe_pheatmap(
     n_pair_mat,
     color = colorRampPalette(c("grey95", "#56B4E9", "#0072B2"))(100),
-    main = paste0("Pairwise complete n: ", metric, " | ", title_suffix),
+    main = paste0("Pairwise complete n: ", metric, " | ", title_suffix, " | ", covariance_mode, " pooled across all conditions"),
     fontsize_row = ifelse(ncol(n_pair_mat) > 80, 3, 6),
     fontsize_col = ifelse(ncol(n_pair_mat) > 80, 3, 6),
     border_color = NA
@@ -1177,20 +1331,75 @@ plot_correlation_heatmap <- function(mat, metric, class_filter = NULL) {
 plot_network <- function(mat, metric, class_filter = NULL) {
   title_suffix <- ifelse(is.null(class_filter), "all_classes", str_replace_all(class_filter, "[^A-Za-z0-9]+", "_"))
 
-  keep <- colSums(!is.na(mat)) >= min_pairwise_n &
-    apply(mat, 2, function(x) sd(x, na.rm = TRUE) > 0)
+  mat_before <- as.matrix(mat)
 
-  mat <- mat[, keep, drop = FALSE]
-  if (ncol(mat) < 4) return(NULL)
+  keep <- colSums(is.finite(mat_before)) >= min_pairwise_n &
+    apply(mat_before, 2, function(x) {
+      x_sd <- stats::sd(x, na.rm = TRUE)
+      is.finite(x_sd) && x_sd > 0
+    })
 
-  cors <- cor_with_p(mat, min_n = min_pairwise_n) %>%
-    filter(region1 < region2, !is.na(r), abs(r) >= network_abs_r_cutoff, fdr <= network_fdr_cutoff) %>%
-    mutate(fdr_scope = "BH across all pairwise region tests in this metric/class-filtered exploratory network")
+  mat <- mat_before[, keep, drop = FALSE]
+
+  if (ncol(mat) > 0) {
+    n_pair_mat <- pairwise_complete_n_matrix(mat)
+    cor_mat <- spearman_cor_matrix(mat)
+    cor_mat[n_pair_mat < min_pairwise_n] <- NA_real_
+    cor_mat[!is.finite(cor_mat)] <- NA_real_
+    diag(cor_mat) <- 1
+  } else {
+    n_pair_mat <- matrix(integer(), nrow = 0, ncol = 0)
+    cor_mat <- matrix(numeric(), nrow = 0, ncol = 0)
+  }
+
+  region_qc <- write_correlation_heatmap_qc(
+    mat_before = mat_before,
+    mat_after = mat,
+    cor_mat = cor_mat,
+    n_pair_mat = n_pair_mat,
+    metric = metric,
+    class_filter = class_filter,
+    title_suffix = title_suffix,
+    min_pairwise_n = min_pairwise_n
+  )
+
+  pairwise_qc <- make_covariance_pairwise_qc(
+    mat_filtered = mat,
+    metric = metric,
+    class_filter = class_filter,
+    title_suffix = title_suffix,
+    min_pairwise_n = min_pairwise_n,
+    abs_r_cutoff = network_abs_r_cutoff,
+    fdr_cutoff = network_fdr_cutoff
+  )
+
+  readr::write_csv(
+    pairwise_qc,
+    file.path(qc_covariance_dir, paste0("Network_pairwise_edge_qc_", metric, "_", title_suffix, ".csv"))
+  )
+  readr::write_csv(
+    pairwise_qc,
+    file.path(exploratory_network_dir, paste0("Network_pairwise_edge_qc_", metric, "_", title_suffix, ".csv"))
+  )
+
+  write_covariance_network_summary(
+    region_qc = region_qc,
+    pairwise_qc = pairwise_qc,
+    metric = metric,
+    class_filter = class_filter,
+    title_suffix = title_suffix
+  )
+
+  cors <- pairwise_qc %>%
+    filter(retained_edge) %>%
+    mutate(fdr_scope = "BH across all pairwise region tests in this metric/class-filtered exploratory network") %>%
+    select(region1, region2, n_pair, r, p, fdr, fdr_scope)
 
   readr::write_csv(cors, file.path(out_dir, "tables", paste0("network_edges_", metric, "_", title_suffix, ".csv")))
   readr::write_csv(cors, file.path(legacy_tab_dir, paste0("network_edges_", metric, "_", title_suffix, ".csv")))
   readr::write_csv(cors, file.path(exploratory_network_dir, paste0("Network_edges_", metric, "_", title_suffix, ".csv")))
 
+  if (ncol(mat) < 4) return(NULL)
   if (nrow(cors) < 2) return(NULL)
 
   graph <- igraph::graph_from_data_frame(
@@ -1218,8 +1427,8 @@ plot_network <- function(mat, metric, class_filter = NULL) {
     scale_edge_width(range = c(0.2, 2.2)) +
     theme_void(base_size = 9) +
     labs(
-      title = paste0("Region correlation network: ", metric, " | ", title_suffix),
-      subtitle = paste0("Spearman |r| >= ", network_abs_r_cutoff, ", FDR <= ", network_fdr_cutoff)
+      title = paste0("Region correlation network: ", metric, " | ", title_suffix, " | ", covariance_mode),
+      subtitle = paste0("Pooled across all conditions; Spearman |r| >= ", network_abs_r_cutoff, ", FDR <= ", network_fdr_cutoff)
     )
 
   ggsave(file.path(out_dir, "figures", paste0("network_", metric, "_", title_suffix, ".pdf")),
