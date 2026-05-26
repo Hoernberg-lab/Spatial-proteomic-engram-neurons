@@ -39,12 +39,17 @@ dir.create(file.path(out_dir, "tables"), recursive = TRUE, showWarnings = FALSE)
 
 results_root <- file.path(out_dir, "results")
 publication_fig4_fig_dir <- file.path(results_root, "01_publication", "figures", "fig4")
+publication_fig4_panel_fig_dir <- file.path(publication_fig4_fig_dir, "individual_panels")
+publication_fig4_composite_fig_dir <- file.path(publication_fig4_fig_dir, "composite")
+publication_fig4_key_fig_dir <- file.path(publication_fig4_fig_dir, "keys")
 publication_supp_fig_dir <- file.path(results_root, "01_publication", "figures", "supplementary")
 publication_dashboard_fig_dir <- file.path(results_root, "01_publication", "figures", "dashboards")
 publication_fig4_tab_dir <- file.path(results_root, "01_publication", "tables", "fig4")
 publication_supp_tab_dir <- file.path(results_root, "01_publication", "tables", "supplementary")
 publication_source_tab_dir <- file.path(results_root, "01_publication", "tables", "source_data")
 publication_manifest_dir <- file.path(results_root, "01_publication", "manifests")
+exploratory_effect_fig_dir <- file.path(results_root, "02_exploratory", "effect_size_maps")
+exploratory_profile_fig_dir <- file.path(results_root, "02_exploratory", "regional_profiles")
 exploratory_covariance_dir <- file.path(results_root, "02_exploratory", "covariance")
 exploratory_network_dir <- file.path(results_root, "02_exploratory", "network_analysis")
 exploratory_dimred_dir <- file.path(results_root, "02_exploratory", "dimensionality_reduction")
@@ -59,9 +64,11 @@ legacy_tab_dir <- file.path(legacy_dir, "tables")
 session_info_dir <- file.path(results_root, "session_info")
 purrr::walk(
   c(
-    publication_fig4_fig_dir, publication_supp_fig_dir, publication_dashboard_fig_dir,
+    publication_fig4_fig_dir, publication_fig4_panel_fig_dir, publication_fig4_composite_fig_dir,
+    publication_fig4_key_fig_dir, publication_supp_fig_dir, publication_dashboard_fig_dir,
     publication_fig4_tab_dir, publication_supp_tab_dir, publication_source_tab_dir,
-    publication_manifest_dir, exploratory_covariance_dir, exploratory_network_dir,
+    publication_manifest_dir, exploratory_effect_fig_dir, exploratory_profile_fig_dir,
+    exploratory_covariance_dir, exploratory_network_dir,
     exploratory_dimred_dir, exploratory_sensitivity_dir, qc_missingness_dir,
     qc_normalization_dir, qc_region_selection_dir, qc_covariance_dir,
     legacy_dir, legacy_fig_dir, legacy_tab_dir, session_info_dir
@@ -565,15 +572,20 @@ qc_condition_colors <- c(
   CNO_unpaired = "#CC79A7"
 )
 
-save_qc_figure <- function(plot, filename_base, width, height, dpi = 600) {
-  dir.create(file.path(out_dir, "figures"), recursive = TRUE, showWarnings = FALSE)
+save_qc_figure <- function(plot, filename_base, width, height, dpi = 600, subdir = "qc") {
+  target_dir <- file.path(out_dir, "figures", subdir)
+  dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(legacy_fig_dir, recursive = TRUE, showWarnings = FALSE)
-  ggsave(file.path(out_dir, "figures", paste0(filename_base, ".pdf")), plot, width = width, height = height)
-  ggsave(file.path(out_dir, "figures", paste0(filename_base, ".svg")), plot, width = width, height = height, device = svglite::svglite)
-  ggsave(file.path(out_dir, "figures", paste0(filename_base, ".png")), plot, width = width, height = height, dpi = dpi, bg = "white")
+  dir.create(file.path(legacy_fig_dir, subdir), recursive = TRUE, showWarnings = FALSE)
+  ggsave(file.path(target_dir, paste0(filename_base, ".pdf")), plot, width = width, height = height)
+  ggsave(file.path(target_dir, paste0(filename_base, ".svg")), plot, width = width, height = height, device = svglite::svglite)
+  ggsave(file.path(target_dir, paste0(filename_base, ".png")), plot, width = width, height = height, dpi = dpi, bg = "white")
   ggsave(file.path(legacy_fig_dir, paste0(filename_base, ".pdf")), plot, width = width, height = height)
   ggsave(file.path(legacy_fig_dir, paste0(filename_base, ".svg")), plot, width = width, height = height, device = svglite::svglite)
   ggsave(file.path(legacy_fig_dir, paste0(filename_base, ".png")), plot, width = width, height = height, dpi = dpi, bg = "white")
+  ggsave(file.path(legacy_fig_dir, subdir, paste0(filename_base, ".pdf")), plot, width = width, height = height)
+  ggsave(file.path(legacy_fig_dir, subdir, paste0(filename_base, ".svg")), plot, width = width, height = height, device = svglite::svglite)
+  ggsave(file.path(legacy_fig_dir, subdir, paste0(filename_base, ".png")), plot, width = width, height = height, dpi = dpi, bg = "white")
 }
 
 qc_plot_animal_metric <- function(data, y_col, title, y_label, filename_base) {
@@ -620,7 +632,7 @@ qc_missing_plot <- ggplot(animal_region_missingness, aes(x = RegionShort, y = Sa
     legend.position = "bottom"
   ) +
   labs(title = "Animal x region missingness", x = "Regions", y = NULL)
-save_qc_figure(qc_missing_plot, "QC_animal_region_missingness_heatmap", width = 9, height = 5)
+save_qc_figure(qc_missing_plot, "QC_animal_region_missingness_heatmap", width = 6.8, height = 5)
 
 # -----------------------------
 # 4. QC tables
@@ -772,6 +784,61 @@ condition_colors <- c(
   CNO_unpaired = "#CC79A7"
 )
 
+condition_display_labels <- c(
+  VEH_paired = "VEH paired learning",
+  VEH_unpaired = "VEH unpaired stress",
+  CNO_paired = "CNO during learning",
+  CNO_unpaired = "CNO during stress"
+)
+
+condition_short_labels <- c(
+  VEH_paired = "VEH-L",
+  VEH_unpaired = "VEH-S",
+  CNO_paired = "CNO-L",
+  CNO_unpaired = "CNO-S"
+)
+
+metric_display_labels <- c(
+  Cell_Count = "cFos+ cell count",
+  Intensity = "Projection intensity"
+)
+
+contrast_display_labels <- c(
+  Learning_effect = "Paired learning effect",
+  CeM_manipulation_during_learning = "CNO effect during learning",
+  CeM_manipulation_during_stress = "CNO effect during stress",
+  Learning_x_CeM_interaction = "Learning x CNO interaction",
+  Paired_vs_unpaired = "Paired vs unpaired average",
+  CNO_vs_VEH = "CNO vs VEH average"
+)
+
+contrast_short_labels <- c(
+  Learning_effect = "Learning",
+  CeM_manipulation_during_learning = "CNO-learning",
+  CeM_manipulation_during_stress = "CNO-stress",
+  Learning_x_CeM_interaction = "Interaction",
+  Paired_vs_unpaired = "Paired avg.",
+  CNO_vs_VEH = "CNO avg."
+)
+
+contrast_plain_language <- c(
+  Learning_effect = "Positive values mean VEH paired learning is higher than VEH unpaired stress.",
+  CeM_manipulation_during_learning = "Positive values mean CNO during learning is higher than VEH during learning.",
+  CeM_manipulation_during_stress = "Positive values mean CNO during stress is higher than VEH during stress.",
+  Learning_x_CeM_interaction = "Interaction asks whether the CNO-VEH difference changes between learning and stress: positive means the CNO effect is stronger, or more positive, during paired learning than during unpaired stress.",
+  Paired_vs_unpaired = "Positive values mean paired groups are higher than unpaired groups on average.",
+  CNO_vs_VEH = "Positive values mean CNO groups are higher than VEH groups on average."
+)
+
+display_metric <- function(metric) {
+  dplyr::coalesce(unname(metric_display_labels[metric]), metric)
+}
+
+display_contrast <- function(contrast, short = FALSE) {
+  labels <- if (isTRUE(short)) contrast_short_labels else contrast_display_labels
+  dplyr::coalesce(unname(labels[contrast]), contrast)
+}
+
 effect_colors <- c(
   negative = "#2166AC",
   neutral = "#F7F7F7",
@@ -813,26 +880,69 @@ fig4_system_levels <- c(
 theme_nature <- function(base_size = 8) {
   theme_classic(base_size = base_size) +
     theme(
-      plot.title = element_text(face = "bold", size = base_size + 1),
-      plot.subtitle = element_text(size = base_size, colour = "grey30"),
-      axis.line = element_line(linewidth = 0.25),
-      axis.ticks = element_line(linewidth = 0.25),
+      text = element_text(colour = "black"),
+      plot.title = element_text(face = "bold", size = base_size + 0.8, hjust = 0),
+      plot.subtitle = element_text(size = base_size - 0.2, colour = "grey25", hjust = 0),
+      axis.title = element_text(colour = "black"),
+      axis.text = element_text(colour = "black"),
+      axis.line = element_line(linewidth = 0.25, colour = "black"),
+      axis.ticks = element_line(linewidth = 0.25, colour = "black"),
       strip.background = element_blank(),
       strip.text = element_text(face = "bold", size = base_size - 1),
       legend.title = element_text(size = base_size - 1),
-      legend.text = element_text(size = base_size - 1)
+      legend.text = element_text(size = base_size - 1),
+      legend.key.size = grid::unit(3.4, "mm"),
+      plot.margin = margin(4, 5, 4, 5)
     )
 }
 
-save_figure <- function(plot, filename_base, width, height, dpi = 600) {
-  dir.create(file.path(out_dir, "figures"), recursive = TRUE, showWarnings = FALSE)
+legacy_figure_subdir <- function(filename_base) {
+  case_when(
+    str_detect(filename_base, "^volcano_") ~ "volcano_fdr",
+    str_detect(filename_base, "^top_region_profiles_") ~ "regional_profiles",
+    str_detect(filename_base, "^class_level_profiles_") ~ "class_level_profiles",
+    str_detect(filename_base, "^PCA_|^UMAP_") ~ "dimensionality_reduction",
+    str_detect(filename_base, "^CeM_centered") ~ "covariance",
+    str_detect(filename_base, "heatmap|effect_size") ~ "effect_size_maps",
+    TRUE ~ "misc"
+  )
+}
+
+figure_target_dir <- function(subdir) {
+  case_when(
+    str_starts(subdir, "volcano_fdr") ~ file.path(exploratory_profile_fig_dir, subdir),
+    str_starts(subdir, "regional_profiles") ~ file.path(exploratory_profile_fig_dir, str_remove(subdir, "^regional_profiles/?")),
+    str_starts(subdir, "class_level_profiles") ~ file.path(exploratory_profile_fig_dir, subdir),
+    str_starts(subdir, "effect_size_maps") ~ file.path(exploratory_effect_fig_dir, str_remove(subdir, "^effect_size_maps/?")),
+    str_starts(subdir, "covariance") ~ file.path(exploratory_covariance_dir, "figures", str_remove(subdir, "^covariance/?")),
+    str_starts(subdir, "dimensionality_reduction") ~ file.path(exploratory_dimred_dir, "figures", str_remove(subdir, "^dimensionality_reduction/?")),
+    str_starts(subdir, "qc") ~ file.path(results_root, "03_qc", "figures", str_remove(subdir, "^qc/?")),
+    TRUE ~ file.path(out_dir, "figures", subdir)
+  ) %>%
+    str_replace("/$", "")
+}
+
+save_figure <- function(plot, filename_base, width, height, dpi = 600, subdir = NULL) {
+  if (is.null(plot)) return(invisible(NULL))
+  subdir <- subdir %||% legacy_figure_subdir(filename_base)
+  target_dir <- figure_target_dir(subdir)
+  dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)
+  dir.create(file.path(out_dir, "figures", subdir), recursive = TRUE, showWarnings = FALSE)
   dir.create(legacy_fig_dir, recursive = TRUE, showWarnings = FALSE)
-  ggsave(file.path(out_dir, "figures", paste0(filename_base, ".pdf")), plot, width = width, height = height)
-  ggsave(file.path(out_dir, "figures", paste0(filename_base, ".svg")), plot, width = width, height = height, device = svglite::svglite)
-  ggsave(file.path(out_dir, "figures", paste0(filename_base, ".png")), plot, width = width, height = height, dpi = dpi, bg = "white")
+  dir.create(file.path(legacy_fig_dir, subdir), recursive = TRUE, showWarnings = FALSE)
+  ggsave(file.path(target_dir, paste0(filename_base, ".pdf")), plot, width = width, height = height)
+  ggsave(file.path(target_dir, paste0(filename_base, ".svg")), plot, width = width, height = height, device = svglite::svglite)
+  ggsave(file.path(target_dir, paste0(filename_base, ".png")), plot, width = width, height = height, dpi = dpi, bg = "white")
+  ggsave(file.path(out_dir, "figures", subdir, paste0(filename_base, ".pdf")), plot, width = width, height = height)
+  ggsave(file.path(out_dir, "figures", subdir, paste0(filename_base, ".svg")), plot, width = width, height = height, device = svglite::svglite)
+  ggsave(file.path(out_dir, "figures", subdir, paste0(filename_base, ".png")), plot, width = width, height = height, dpi = dpi, bg = "white")
   ggsave(file.path(legacy_fig_dir, paste0(filename_base, ".pdf")), plot, width = width, height = height)
   ggsave(file.path(legacy_fig_dir, paste0(filename_base, ".svg")), plot, width = width, height = height, device = svglite::svglite)
   ggsave(file.path(legacy_fig_dir, paste0(filename_base, ".png")), plot, width = width, height = height, dpi = dpi, bg = "white")
+  ggsave(file.path(legacy_fig_dir, subdir, paste0(filename_base, ".pdf")), plot, width = width, height = height)
+  ggsave(file.path(legacy_fig_dir, subdir, paste0(filename_base, ".svg")), plot, width = width, height = height, device = svglite::svglite)
+  ggsave(file.path(legacy_fig_dir, subdir, paste0(filename_base, ".png")), plot, width = width, height = height, dpi = dpi, bg = "white")
+  invisible(plot)
 }
 
 make_group_summary_matrix <- function(data, metric) {
@@ -1301,7 +1411,7 @@ plot_correlation_heatmap <- function(mat, metric, class_filter = NULL) {
   # on sparse/degenerate covariance structures.
   heatmap_cluster <- FALSE
 
-  pdf(file.path(out_dir, "figures", paste0("correlation_heatmap_", metric, "_", title_suffix, ".pdf")), width = 9, height = 9)
+  pdf(file.path(out_dir, "figures", paste0("correlation_heatmap_", metric, "_", title_suffix, ".pdf")), width = 6.8, height = 6.8)
   safe_pheatmap(
     cor_mat,
     cluster_rows = heatmap_cluster,
@@ -1316,7 +1426,7 @@ plot_correlation_heatmap <- function(mat, metric, class_filter = NULL) {
   )
   dev.off()
 
-  pdf(file.path(qc_covariance_dir, paste0("Correlation_heatmap_pairwise_n_", metric, "_", title_suffix, ".pdf")), width = 9, height = 9)
+  pdf(file.path(qc_covariance_dir, paste0("Correlation_heatmap_pairwise_n_", metric, "_", title_suffix, ".pdf")), width = 6.8, height = 6.8)
   safe_pheatmap(
     n_pair_mat,
     color = colorRampPalette(c("grey95", "#56B4E9", "#0072B2"))(100),
@@ -1432,13 +1542,13 @@ plot_network <- function(mat, metric, class_filter = NULL) {
     )
 
   ggsave(file.path(out_dir, "figures", paste0("network_", metric, "_", title_suffix, ".pdf")),
-         p, width = 9, height = 7)
+         p, width = 6.8, height = 5.8)
   ggsave(file.path(legacy_fig_dir, paste0("network_", metric, "_", title_suffix, ".pdf")),
-         p, width = 9, height = 7)
+         p, width = 6.8, height = 5.8)
   ggsave(file.path(exploratory_network_dir, paste0("Network_", metric, "_", title_suffix, ".pdf")),
-         p, width = 9, height = 7)
+         p, width = 6.8, height = 5.8)
   ggsave(file.path(exploratory_network_dir, paste0("Network_", metric, "_", title_suffix, ".png")),
-         p, width = 9, height = 7, dpi = 600, bg = "white")
+         p, width = 6.8, height = 5.8, dpi = 600, bg = "white")
 }
 
 run_step_safely <- function(step_label, fn) {
@@ -1486,7 +1596,7 @@ for (metric in metrics_to_analyse) {
     finite_values <- mat_log_z[is.finite(mat_log_z)]
     if (length(unique(finite_values)) >= 2) {
       pdf(file.path(out_dir, "figures", paste0("sample_region_heatmap_", metric, "_all_classes.pdf")),
-          width = 10, height = max(5, nrow(mat_log) * 0.20))
+          width = 6.8, height = max(5, nrow(mat_log) * 0.20))
       safe_pheatmap(
         mat_log_z,
         annotation_row = row_anno,
@@ -1747,15 +1857,14 @@ interpret_region_effects <- function(res, metric, top_n_per_contrast = 25) {
         TRUE ~ "no directional change"
       ),
       evidence = case_when(
-        adj.P.Val.global < 0.05 ~ "FDR < 0.05",
-        adj.P.Val.global < 0.10 ~ "FDR < 0.10",
-        P.Value < 0.05 ~ "nominal P < 0.05",
+        adj.P.Val.global < 0.05 ~ "FDR q < 0.05",
+        adj.P.Val.global < 0.10 ~ "FDR q < 0.10",
         TRUE ~ "ranked exploratory"
       ),
       biological_read = paste0(
         Annotation, " shows ", direction, " for ", metric_label,
         " in ", contrast, " (logFC = ", scales::number(logFC, accuracy = 0.01),
-        ", raw P = ", scales::pvalue(P.Value), ")."
+        ", FDR q = ", scales::pvalue(adj.P.Val.global), ")."
       )
     ) %>%
     group_by(contrast) %>%
@@ -1823,14 +1932,14 @@ plot_effect_size_heatmap <- function(res, metric) {
 
   mat <- clean_heatmap_matrix(mat, fill = 0)
 
-  pdf(file.path(out_dir, "figures", paste0("effect_size_heatmap_logFC_", metric, ".pdf")),
-      width = 8, height = max(5, min(18, nrow(mat) * 0.12)))
+  pdf(file.path(exploratory_effect_fig_dir, paste0("effect_size_heatmap_logFC_", metric, ".pdf")),
+      width = 5.8, height = max(4.5, min(12, nrow(mat) * 0.10)))
   safe_pheatmap(
     mat,
     cluster_rows = TRUE,
     cluster_cols = FALSE,
     color = colorRampPalette(rev(RColorBrewer::brewer.pal(11, "RdBu")))(100),
-    main = paste0("Regional effect-size map: ", metric, " logFC"),
+    main = paste0("Regional effect-size map: ", display_metric(metric), " logFC"),
     fontsize_row = ifelse(nrow(mat) > 80, 4, 6),
     border_color = NA
   )
@@ -1844,30 +1953,30 @@ purrr::walk2(contrast_tables, names(contrast_tables), ~ plot_effect_size_heatmap
 # -----------------------------
 plot_contrast_volcano <- function(res, metric, contrast_name) {
   d <- res %>%
-    filter(contrast == contrast_name, !is.na(P.Value), !is.na(logFC)) %>%
+    filter(contrast == contrast_name, !is.na(adj.P.Val.global), !is.na(logFC)) %>%
     mutate(
-      neglog10p = -log10(P.Value),
-      significant = adj.P.Val.global < 0.10,
-      label = if_else(significant | rank(P.Value) <= 10, Annotation, NA_character_)
+      neglog10q = -log10(pmax(adj.P.Val.global, .Machine$double.xmin)),
+      fdr_pass = adj.P.Val.global < 0.10,
+      label = if_else(fdr_pass, Annotation, NA_character_)
     )
 
   if (nrow(d) < 3) return(NULL)
 
-  p <- ggplot(d, aes(x = logFC, y = neglog10p)) +
-    geom_hline(yintercept = -log10(0.05), linewidth = 0.25, linetype = "dashed") +
-    geom_vline(xintercept = 0, linewidth = 0.25) +
-    geom_point(aes(fill = Class, shape = significant), alpha = 0.85, size = 2.2, colour = "grey20", stroke = 0.2) +
-    ggrepel::geom_text_repel(aes(label = label), size = 2.5, max.overlaps = 30) +
-    scale_shape_manual(values = c(`FALSE` = 21, `TRUE` = 24)) +
+  p <- ggplot(d, aes(x = logFC, y = neglog10q)) +
+    geom_hline(yintercept = -log10(0.10), linewidth = 0.25, linetype = "dashed", colour = "grey45") +
+    geom_vline(xintercept = 0, linewidth = 0.25, colour = "grey45") +
+    geom_point(aes(fill = Class), shape = 21, alpha = 0.85, size = 2.0, colour = "grey20", stroke = 0.2) +
+    geom_point(data = d %>% filter(fdr_pass), shape = 21, size = 2.8, colour = "black", fill = NA, stroke = 0.35) +
+    ggrepel::geom_text_repel(aes(label = label), size = 2.2, max.overlaps = 30) +
     theme_nature(base_size = 8) +
     labs(
-      title = paste0(metric, ": ", contrast_name),
-      subtitle = "Labelled regions are FDR < 0.10 or among the 10 lowest raw P values",
-      x = "logFC on log1p scale",
-      y = "-log10 raw P"
+      title = paste0(display_metric(metric), ": ", display_contrast(contrast_name)),
+      subtitle = paste0("Circle and labels mark FDR q < 0.10. ", contrast_plain_language[contrast_name]),
+      x = "Effect size, logFC on log1p scale",
+      y = "-log10 FDR q"
     )
 
-  save_figure(p, paste0("volcano_", metric, "_", contrast_name), width = 6, height = 5)
+  save_figure(p, paste0("volcano_", metric, "_", contrast_name), width = 4.8, height = 4.2, subdir = "volcano_fdr")
 }
 
 for (metric in names(contrast_tables)) {
@@ -1897,21 +2006,24 @@ plot_top_region_profiles <- function(data, res, metric, contrast_name, top_n = 2
   p <- ggplot(d, aes(x = Condition, y = value)) +
     geom_boxplot(aes(colour = Condition), outlier.shape = NA, width = 0.55, linewidth = 0.25) +
     geom_jitter(aes(fill = Condition), width = 0.12, size = 1.2, alpha = 0.7, shape = 21, colour = "white", stroke = 0.15) +
-    facet_wrap(~ RegionLabel, scales = "free_y", ncol = 4) +
-    scale_colour_manual(values = condition_colors, drop = FALSE) +
-    scale_fill_manual(values = condition_colors, drop = FALSE) +
+    facet_wrap(~ RegionLabel, scales = "free_y", ncol = 3) +
+    scale_x_discrete(labels = condition_short_labels, drop = FALSE) +
+    scale_colour_manual(values = condition_colors, guide = "none", drop = FALSE) +
+    scale_fill_manual(values = condition_colors, labels = condition_display_labels, name = "Condition", drop = FALSE) +
     theme_nature(base_size = 8) +
     theme(
-      axis.text.x = element_text(angle = 45, hjust = 1),
-      strip.text = element_text(size = 6)
+      axis.text.x = element_text(angle = 35, hjust = 1),
+      strip.text = element_text(size = 6),
+      legend.position = "bottom"
     ) +
     labs(
-      title = paste0("Top region profiles: ", metric, " | ", contrast_name),
+      title = paste0("Regional profiles: ", display_metric(metric)),
+      subtitle = display_contrast(contrast_name),
       x = NULL,
-      y = paste0("log1p ", metric)
+      y = paste0("log1p ", display_metric(metric))
     )
 
-  save_figure(p, paste0("top_region_profiles_", metric, "_", contrast_name), width = 10, height = 8)
+  save_figure(p, paste0("top_region_profiles_", metric, "_", contrast_name), width = 6.8, height = 7.2, subdir = "regional_profiles")
 }
 
 for (metric in names(contrast_tables)) {
@@ -1948,17 +2060,18 @@ plot_class_profiles <- function(metric) {
     geom_boxplot(aes(colour = Condition), outlier.shape = NA, width = 0.55, linewidth = 0.25) +
     geom_jitter(aes(fill = Condition), width = 0.12, size = 1.1, alpha = 0.75, shape = 21, colour = "white", stroke = 0.15) +
     facet_wrap(~ Class, scales = "free_y", ncol = 4) +
-    scale_colour_manual(values = condition_colors, drop = FALSE) +
-    scale_fill_manual(values = condition_colors, drop = FALSE) +
+    scale_x_discrete(labels = condition_short_labels, drop = FALSE) +
+    scale_colour_manual(values = condition_colors, guide = "none", drop = FALSE) +
+    scale_fill_manual(values = condition_colors, labels = condition_display_labels, name = "Condition", drop = FALSE) +
     theme_nature(base_size = 8) +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    theme(axis.text.x = element_text(angle = 35, hjust = 1), legend.position = "bottom") +
     labs(
-      title = paste0("Class-level tracing profiles: ", metric),
+      title = paste0("Class-level profiles: ", display_metric(metric)),
       x = NULL,
-      y = paste0("Mean log1p ", metric, " across regions")
+      y = paste0("Mean log1p ", display_metric(metric), " across regions")
     )
 
-  save_figure(p, paste0("class_level_profiles_", metric), width = 10, height = 7)
+  save_figure(p, paste0("class_level_profiles_", metric), width = 6.8, height = 6.2, subdir = "regional_profiles/class_level")
 }
 
 purrr::walk(metrics_to_analyse, plot_class_profiles)
@@ -2146,7 +2259,7 @@ run_cem_connectivity <- function(data, metric) {
       y = NULL
     )
 
-  save_figure(p, paste0("CeM_centered_connectivity_", metric), width = 9, height = 7)
+  save_figure(p, paste0("CeM_centered_connectivity_", metric), width = 6.4, height = 6.2, subdir = "covariance")
 }
 
 purrr::walk(metrics_to_analyse, ~ run_cem_connectivity(long, .x))
@@ -2176,11 +2289,13 @@ readr::write_csv(nature_condition_labels, file.path(main_tab_dir, "main_figure_c
 theme_nature_main <- function(base_size = 7.5) {
   theme_classic(base_size = base_size) +
     theme(
+      text = element_text(colour = "black"),
       plot.title = element_text(face = "bold", size = base_size + 0.5),
+      plot.subtitle = element_text(size = base_size - 0.2, colour = "grey25"),
       axis.title = element_text(size = base_size),
-      axis.text = element_text(size = base_size - 0.5, colour = "grey15"),
-      axis.line = element_line(linewidth = 0.25),
-      axis.ticks = element_line(linewidth = 0.25),
+      axis.text = element_text(size = base_size - 0.5, colour = "black"),
+      axis.line = element_line(linewidth = 0.25, colour = "black"),
+      axis.ticks = element_line(linewidth = 0.25, colour = "black"),
       legend.title = element_text(size = base_size - 0.5),
       legend.text = element_text(size = base_size - 0.5),
       legend.key.size = grid::unit(3.2, "mm"),
@@ -2509,7 +2624,7 @@ make_learning_stress_heatmap <- function(top_n = 12) {
     facet_grid(SystemGroup ~ ., scales = "free_y", space = "free_y") +
     scale_fill_gradient2(low = effect_colors[["negative"]], mid = effect_colors[["neutral"]], high = effect_colors[["positive"]],
                          midpoint = 0, limits = c(-max_abs, max_abs), oob = scales::squish,
-                         name = "logFC") +
+                         name = "Effect size\n(logFC)") +
     theme_nature_main(base_size = 7.2) +
     theme(
       axis.line = element_blank(),
@@ -2697,7 +2812,7 @@ build_condition_network <- function(mat,
                                     min_complete_n = 4,
                                     p_cutoff = 0.05,
                                     fdr_cutoff = 0.10,
-                                    edge_rule = c("nominal_p", "fdr", "effect_size_only")) {
+                                    edge_rule = c("fdr", "effect_size_only", "nominal_p")) {
   edge_rule <- match.arg(edge_rule)
   features <- colnames(mat)
   empty_edges <- tibble(
@@ -3021,7 +3136,7 @@ format_network_edge_label <- function(edge_id) {
 make_network_rewiring_figure <- function(data,
                                          region_top_n = 14,
                                          abs_r_cutoff = 0.60,
-                                         edge_rule = c("nominal_p", "effect_size_only", "fdr"),
+                                         edge_rule = c("fdr", "effect_size_only", "nominal_p"),
                                          reference_condition = "VEH_unpaired") {
   edge_rule <- match.arg(edge_rule)
   edge_rule_suffix <- paste0("_", edge_rule)
@@ -3384,7 +3499,7 @@ make_network_rewiring_figure <- function(data,
       geom_tile(colour = "white", linewidth = 0.22) +
       facet_wrap(~ NetworkCondition, scales = "free_y", ncol = 2) +
       scale_fill_gradient2(low = effect_colors[["negative"]], mid = effect_colors[["neutral"]], high = effect_colors[["positive"]], midpoint = 0,
-                           limits = c(-1, 1), oob = scales::squish, name = "rho") +
+                           limits = c(-1, 1), oob = scales::squish, name = "Spearman\nrho") +
       fig4_theme(base_size = 6.4) +
       theme(
         axis.line = element_blank(),
@@ -3521,7 +3636,7 @@ panel_network <- make_network_rewiring_figure(
   long,
   region_top_n = 14,
   abs_r_cutoff = 0.60,
-  edge_rule = "nominal_p"
+  edge_rule = "fdr"
 )
 
 panel_network_effect_size_only <- make_network_rewiring_figure(
@@ -3631,9 +3746,9 @@ fig4_main_contrasts <- c(
 )
 fig4_contrast_labels <- c(
   Learning_effect = "Learning",
-  CeM_manipulation_during_learning = "CNO-learning",
-  CeM_manipulation_during_stress = "CNO-stress",
-  Learning_x_CeM_interaction = "Interaction"
+  CeM_manipulation_during_learning = "CNO during\nlearning",
+  CeM_manipulation_during_stress = "CNO during\nstress",
+  Learning_x_CeM_interaction = "CNO effect\nchange"
 )
 fig4_condition_labels_short <- c(
   VEH_paired = "VEH-L",
@@ -3671,7 +3786,7 @@ fig4_note_skip <- function(panel, reason) {
   invisible(NULL)
 }
 
-save_fig4_plot <- function(plot, filename_base, width, height, dir = fig4_fig_dir, dpi = 600) {
+save_fig4_plot <- function(plot, filename_base, width, height, dir = publication_fig4_panel_fig_dir, dpi = 600, mirror_root = TRUE) {
   if (is.null(plot)) return(invisible(NULL))
   dir.create(dir, recursive = TRUE, showWarnings = FALSE)
   for (ext in c("svg", "pdf", "png")) {
@@ -3682,6 +3797,19 @@ save_fig4_plot <- function(plot, filename_base, width, height, dir = fig4_fig_di
       ggsave(filename, plot, width = width, height = height, units = "in", dpi = dpi, bg = "white")
     } else {
       ggsave(filename, plot, width = width, height = height, units = "in")
+    }
+  }
+  if (isTRUE(mirror_root) && normalizePath(dir, winslash = "/", mustWork = FALSE) != normalizePath(fig4_fig_dir, winslash = "/", mustWork = FALSE)) {
+    dir.create(fig4_fig_dir, recursive = TRUE, showWarnings = FALSE)
+    for (ext in c("svg", "pdf", "png")) {
+      filename <- file.path(fig4_fig_dir, paste0(filename_base, ".", ext))
+      if (ext == "svg") {
+        ggsave(filename, plot, width = width, height = height, units = "in", device = svglite::svglite)
+      } else if (ext == "png") {
+        ggsave(filename, plot, width = width, height = height, units = "in", dpi = dpi, bg = "white")
+      } else {
+        ggsave(filename, plot, width = width, height = height, units = "in")
+      }
     }
   }
   invisible(plot)
@@ -3822,11 +3950,11 @@ fig4_add_contrast_qc <- function(data) {
 }
 
 fig4_sign_key <- tibble::tribble(
-  ~contrast, ~short_label, ~contrast_formula, ~positive_logFC_means,
-  "Learning_effect", "Learning", "VEH_paired - VEH_unpaired", "VEH_paired > VEH_unpaired",
-  "CeM_manipulation_during_learning", "CNO effect during learning", "CNO_paired - VEH_paired", "CNO_paired > VEH_paired",
-  "CeM_manipulation_during_stress", "CNO effect during stress", "CNO_unpaired - VEH_unpaired", "CNO_unpaired > VEH_unpaired",
-  "Learning_x_CeM_interaction", "Interaction", "(CNO_paired - VEH_paired) - (CNO_unpaired - VEH_unpaired)", "CNO effect is stronger / more positive during learning than during stress"
+  ~contrast, ~short_label, ~contrast_formula, ~positive_logFC_means, ~plain_language,
+  "Learning_effect", "Learning", "VEH_paired - VEH_unpaired", "VEH_paired > VEH_unpaired", "How paired learning differs from unpaired stress in VEH animals.",
+  "CeM_manipulation_during_learning", "CNO during learning", "CNO_paired - VEH_paired", "CNO_paired > VEH_paired", "How CNO changes the paired-learning condition.",
+  "CeM_manipulation_during_stress", "CNO during stress", "CNO_unpaired - VEH_unpaired", "CNO_unpaired > VEH_unpaired", "How CNO changes the unpaired-stress condition.",
+  "Learning_x_CeM_interaction", "CNO effect change", "(CNO_paired - VEH_paired) - (CNO_unpaired - VEH_unpaired)", "CNO effect is stronger / more positive during learning than during stress", "Interaction means the CNO-VEH difference is compared across contexts; it asks whether the CNO effect depends on learning versus stress."
 )
 write_fig4_table(fig4_sign_key, "fig4_contrast_sign_key")
 
@@ -4279,7 +4407,7 @@ make_fig4_heatmap <- function(metric, title_label) {
     scale_fill_gradient2(
       low = effect_colors[["negative"]], mid = effect_colors[["neutral"]], high = effect_colors[["positive"]],
       midpoint = 0, limits = c(-fig4_heatmap_limit, fig4_heatmap_limit),
-      oob = scales::squish, na.value = "grey88", name = "logFC"
+      oob = scales::squish, na.value = "grey88", name = "Effect size\n(logFC)"
     ) +
     fig4_theme(base_size = 6.4) +
     theme(
@@ -4292,7 +4420,7 @@ make_fig4_heatmap <- function(metric, title_label) {
     ) +
     labs(
       title = title_label,
-      subtitle = "Rows require >=2 displayed central effects; open circle = low-n exploratory. Grey = missing, non-estimable, or excluded.",
+      subtitle = "Colour shows logFC effect size. Open circle = low-n exploratory. Grey = missing or not estimable.",
       x = NULL,
       y = NULL
     )
@@ -4313,7 +4441,7 @@ fig4A <- {
 
   contrast_d <- fig4_sign_key %>%
     mutate(
-      label = paste0(short_label, ": + means ", positive_logFC_means),
+      label = paste0(short_label, ": positive logFC = ", positive_logFC_means, ". ", plain_language),
       y = rev(row_number())
     )
 
@@ -4321,13 +4449,13 @@ fig4A <- {
     geom_point(data = condition_d, aes(x = 0.03, y = y, fill = Condition), shape = 21, size = 2.6, colour = "grey20", stroke = 0.2) +
     geom_text(data = condition_d, aes(x = 0.08, y = y, label = Label), hjust = 0, size = 2.2, fontface = "bold") +
     geom_text(data = condition_d, aes(x = 0.29, y = y, label = Meaning), hjust = 0, size = 2.05) +
-    geom_text(data = contrast_d, aes(x = 0.03, y = y - 4.7, label = str_wrap(label, 70)), hjust = 0, size = 2.0, lineheight = 0.9) +
+    geom_text(data = contrast_d, aes(x = 0.03, y = y - 4.7, label = str_wrap(label, 78)), hjust = 0, size = 1.9, lineheight = 0.9) +
     scale_fill_manual(values = nature_condition_colors, guide = "none", drop = FALSE) +
     coord_cartesian(xlim = c(0, 1), ylim = c(-4.2, 4.45), clip = "off") +
     theme_void(base_size = 7) +
     labs(
-      title = "Conditions and contrast sign",
-      subtitle = "Insufficient region/group coverage is greyed or excluded; full n and missingness are in QC tables."
+      title = "Conditions and effect directions",
+      subtitle = "Interaction means the CNO-VEH difference is tested for whether it changes between learning and stress."
     )
 }
 
@@ -4560,11 +4688,12 @@ make_fig4_pca <- function(data) {
 fig4F <- make_fig4_pca(long)
 if (is.null(fig4F)) fig4_note_skip("Panel F", "PCA skipped because too few samples or variable features were available.")
 
-save_fig4_plot(fig4B, "fig4B_projection_intensity_effect_size_map", width = 5.4, height = 6.6)
-save_fig4_plot(fig4C, "fig4C_cfos_cell_count_effect_size_map", width = 5.4, height = 6.6)
-save_fig4_plot(fig4D, "fig4D_key_region_condition_profiles", width = 8.8, height = 3.8)
-save_fig4_plot(fig4E, "fig4E_cfos_cell_count_projection_dissociation", width = 4.5, height = 4.0)
-save_fig4_plot(fig4F, "fig4F_systems_level_pca", width = 4.2, height = 3.7)
+save_fig4_plot(fig4A, "fig4A_condition_and_contrast_key", width = 6.8, height = 2.6, dir = publication_fig4_key_fig_dir)
+save_fig4_plot(fig4B, "fig4B_projection_intensity_effect_size_map", width = 4.3, height = 5.8)
+save_fig4_plot(fig4C, "fig4C_cfos_cell_count_effect_size_map", width = 4.3, height = 5.8)
+save_fig4_plot(fig4D, "fig4D_key_region_condition_profiles", width = 6.8, height = 3.6)
+save_fig4_plot(fig4E, "fig4E_cfos_cell_count_projection_dissociation", width = 3.8, height = 3.6)
+save_fig4_plot(fig4F, "fig4F_systems_level_pca", width = 3.8, height = 3.5)
 
 fig4_main <- (
   fig4A /
@@ -4576,8 +4705,8 @@ fig4_main <- (
   patchwork::plot_annotation(tag_levels = "A") &
   theme(plot.tag = element_text(face = "bold", size = 9), legend.position = "bottom")
 
-save_fig4_plot(fig4_main, "Fig4_learning_stress_cfos_cell_count_projection", width = 12.0, height = 10.8)
-save_fig4_plot(fig4_main, "Fig4_dashboard_learning_stress_cfos_cell_count_projection", width = 8.0, height = 10.8, dir = publication_dashboard_fig_dir)
+save_fig4_plot(fig4_main, "Fig4_learning_stress_cfos_cell_count_projection", width = 7.2, height = 10.4, dir = publication_fig4_composite_fig_dir)
+save_fig4_plot(fig4_main, "Fig4_dashboard_learning_stress_cfos_cell_count_projection", width = 7.2, height = 10.4, dir = publication_dashboard_fig_dir, mirror_root = FALSE)
 
 make_full_effect_heatmap <- function(metric) {
   d <- fig4_all_effects %>%
@@ -4950,13 +5079,8 @@ make_condition_correlation_outputs <- function(metric, value_label, use_normaliz
           if_else(Region1 == Region2, NA_real_, p_value),
           method = "BH"
         ),
-        nominal_sig = !is.na(p_value) & p_value < 0.05 & Region1 != Region2,
         fdr_sig = !is.na(fdr) & fdr < 0.10 & Region1 != Region2,
-        significance_marker = case_when(
-          fdr_sig ~ "FDR < 0.10",
-          nominal_sig ~ "nominal P < 0.05",
-          TRUE ~ "not significant"
-        ),
+        significance_marker = if_else(fdr_sig, "FDR q < 0.10", NA_character_),
         Region1Short = factor(
           Region1Short,
         levels = rev(selected_labels[selected_regions])
@@ -5065,15 +5189,6 @@ make_condition_correlation_outputs <- function(metric, value_label, use_normaliz
     geom_tile(colour = "white", linewidth = 0.08) +
     geom_point(
       data = plot_rows %>%
-        filter(nominal_sig, Region1 != Region2),
-      aes(x = x_idx, y = y_idx),
-      inherit.aes = FALSE,
-      shape = 16,
-      size = 0.35,
-      colour = "black"
-    ) +
-    geom_point(
-      data = plot_rows %>%
         filter(fdr_sig, Region1 != Region2),
       aes(x = x_idx, y = y_idx),
       inherit.aes = FALSE,
@@ -5130,7 +5245,7 @@ make_condition_correlation_outputs <- function(metric, value_label, use_normaliz
       limits = c(-1, 1),
       oob = scales::squish,
       na.value = "grey88",
-      name = "rho"
+      name = "Spearman\nrho"
     ) +
     scale_colour_manual(
       values = system_group_colors,
@@ -5150,7 +5265,7 @@ make_condition_correlation_outputs <- function(metric, value_label, use_normaliz
     labs(
       title = paste0("Exploratory inter-regional covariance: ", value_label),
       subtitle = paste0(
-        "Fill = Spearman rho; dot = nominal P < 0.05; open circle = FDR < 0.10; ",
+        "Fill = Spearman rho; open circle = FDR q < 0.10; ",
         "colored axis-side strips = contiguous region system groups. ",
         "Grey = insufficient paired n or zero variance."
       ),
@@ -5161,7 +5276,7 @@ make_condition_correlation_outputs <- function(metric, value_label, use_normaliz
   save_fig4_plot(
     p,
     paste0("SuppFig4_condition_covariance_", suffix),
-    width = 8.0,
+    width = 6.8,
     height = 7.0,
     dir = exploratory_covariance_dir
   )
@@ -5236,7 +5351,6 @@ make_cem_seed_covariance <- function(metric, value_label, max_targets_to_plot = 
     mutate(
       Metric = metric,
       fdr_sig = !is.na(fdr) & fdr < 0.10,
-      nominal_sig = !is.na(p_value) & p_value < 0.05,
       covariance_note = paste0(
         "CeM-seed covariance tests whether inter-animal variation in CeM signal is associated with variation in other regions. ",
         "All detected regions are tested; the plot shows the strongest estimable targets for readability. ",
@@ -5258,14 +5372,13 @@ make_cem_seed_covariance <- function(metric, value_label, max_targets_to_plot = 
       min_fdr = min(fdr, na.rm = TRUE),
       n_estimable_conditions = n_distinct(Condition[!is.na(rho)]),
       any_fdr_sig = any(fdr_sig, na.rm = TRUE),
-      any_nominal_sig = any(nominal_sig, na.rm = TRUE),
       .groups = "drop"
     ) %>%
     mutate(
       min_p_value = if_else(is.finite(min_p_value), min_p_value, NA_real_),
       min_fdr = if_else(is.finite(min_fdr), min_fdr, NA_real_)
     ) %>%
-    arrange(desc(any_fdr_sig), desc(any_nominal_sig), desc(max_abs_rho), min_p_value)
+    arrange(desc(any_fdr_sig), desc(max_abs_rho), min_p_value)
 
   out <- out %>%
     left_join(cem_target_ranking %>% select(TargetRegionKey, cem_target_rank = max_abs_rho), by = "TargetRegionKey") %>%
@@ -5282,7 +5395,7 @@ make_cem_seed_covariance <- function(metric, value_label, max_targets_to_plot = 
 
   plot_target_levels <- cem_target_ranking %>%
     filter(TargetRegionKey %in% plot_targets) %>%
-    arrange(TargetSystemGroup, TargetMainRegionShort, desc(any_fdr_sig), desc(any_nominal_sig), desc(max_abs_rho), TargetDisplay) %>%
+    arrange(TargetSystemGroup, TargetMainRegionShort, desc(any_fdr_sig), desc(max_abs_rho), TargetDisplay) %>%
     pull(TargetDisplay) %>%
     unique()
 
@@ -5294,19 +5407,15 @@ make_cem_seed_covariance <- function(metric, value_label, max_targets_to_plot = 
         levels = rev(plot_target_levels)
       ),
       Condition = factor(Condition, levels = nature_condition_levels),
-      sig_marker = case_when(
-        fdr_sig ~ "FDR < 0.10",
-        nominal_sig ~ "P < 0.05",
-        TRUE ~ "not significant"
-      )
+      fdr_marker = if_else(fdr_sig, "FDR q < 0.10", NA_character_)
     ) %>%
     ggplot(aes(x = Condition, y = TargetDisplay, fill = rho)) +
     geom_tile(colour = "white", linewidth = 0.12) +
-    geom_point(aes(size = n_pair, shape = sig_marker), colour = "black", stroke = 0.25, fill = NA) +
+    geom_point(aes(size = n_pair), shape = 21, colour = "grey35", stroke = 0.2, fill = NA) +
+    geom_point(data = ~ dplyr::filter(.x, fdr_sig), shape = 21, size = 1.9, colour = "black", stroke = 0.35, fill = NA) +
     facet_grid(TargetSystemGroup ~ ., scales = "free_y", space = "free_y") +
     scale_fill_gradient2(low = effect_colors[["negative"]], mid = effect_colors[["neutral"]], high = effect_colors[["positive"]], midpoint = 0,
-                         limits = c(-1, 1), oob = scales::squish, na.value = "grey88", name = "rho") +
-    scale_shape_manual(values = c("FDR < 0.10" = 21, "P < 0.05" = 16, "not significant" = 4), name = NULL) +
+                         limits = c(-1, 1), oob = scales::squish, na.value = "grey88", name = "Spearman\nrho") +
     scale_size_continuous(range = c(0.4, 1.5), breaks = sort(unique(out$n_pair)), name = "n") +
     fig4_theme(base_size = 6.0) +
     theme(
@@ -5319,7 +5428,7 @@ make_cem_seed_covariance <- function(metric, value_label, max_targets_to_plot = 
     ) +
     labs(
       title = paste0("Exploratory CeM-seed covariance: ", value_label),
-      subtitle = paste0("Top ", max_targets_to_plot, " targets by class and parent-region stem; grey = insufficient n or zero variance."),
+      subtitle = paste0("Fill = Spearman rho; open black circle = FDR q < 0.10. Top ", max_targets_to_plot, " estimable targets shown."),
       x = NULL,
       y = NULL
     )
@@ -5420,25 +5529,37 @@ write_fig4_table(fig4_cov_summary %>% mutate(fdr_scope = "BH within each seed an
 publication_output_index <- tibble(
   output_group = c(
     "Main manuscript figure",
+    "Main manuscript panel figures",
+    "Main manuscript keys",
     "Main manuscript tables",
     "Supplementary exploratory figures",
     "Supplementary exploratory tables",
+    "Exploratory regional profile figures",
+    "Exploratory effect-size figures",
     "Legacy exploratory figures",
     "Legacy exploratory tables"
   ),
   directory = c(
-    fig4_fig_dir,
+    publication_fig4_composite_fig_dir,
+    publication_fig4_panel_fig_dir,
+    publication_fig4_key_fig_dir,
     fig4_tab_dir,
     fig4_supp_fig_dir,
     fig4_supp_tab_dir,
+    exploratory_profile_fig_dir,
+    exploratory_effect_fig_dir,
     legacy_fig_dir,
     legacy_tab_dir
   ),
   recommended_use = c(
-    "Use first for Fig. 4 assembly; SVG/PDF are vector outputs and PNG is 600 dpi.",
+    "Use first for the assembled Fig. 4 composite; SVG/PDF are vector outputs and PNG is 600 dpi.",
+    "Use for editable standalone Fig. 4 panels.",
+    "Use for condition and contrast explanation panels.",
     "Use for source data, region selection documentation, contrast sign key, and QC tables tied to Fig. 4.",
     "Use as supplementary/exploratory displays for full effects, covariance heatmaps, CeM-seed covariance, and overlap summaries.",
     "Use as supplementary source tables; includes full edge lists, cell-count/intensity overlap, CeM rankings, and pairwise-n QC.",
+    "Use for exploratory volcano, regional profile, and class-level profile figures.",
+    "Use for exploratory all-region effect-size maps.",
     "Earlier exploratory figures retained for audit trail; not the primary publication set.",
     "Earlier exploratory tables retained for audit trail; not the primary publication set."
   )
@@ -5462,17 +5583,17 @@ fig4_readme <- c(
   "Manuscript-ready Fig. 4 generation",
   "",
   paste0("Input data used: ", paste(sort(unique(long$SourceFile)), collapse = "; ")),
-  "Main Fig. 4 output: Fig4_learning_stress_cfos_cell_count_projection.svg/pdf/png.",
+  "Main Fig. 4 output: results/01_publication/figures/fig4/composite/Fig4_learning_stress_cfos_cell_count_projection.svg/pdf/png.",
   "Publication outputs are organized under results/01_publication; exploratory covariance, network, dimensionality-reduction, and sensitivity outputs are under results/02_exploratory; QC outputs are under results/03_qc.",
   "Main panels: A condition/contrast key, B projection intensity effects, C cFos+ cell-count effects, D raw key-region profiles, E cFos cell-count/projection dissociation, F descriptive animal-level PCA.",
   "Central contrasts visualized:",
-  paste0("- ", fig4_sign_key$contrast, ": ", fig4_sign_key$contrast_formula, "; positive = ", fig4_sign_key$positive_logFC_means),
+  paste0("- ", fig4_sign_key$short_label, ": ", fig4_sign_key$contrast_formula, "; positive = ", fig4_sign_key$positive_logFC_means, ". ", fig4_sign_key$plain_language),
   "",
   "Transformation: log1p. Main effect maps use raw, non-normalized values by default. Normalized log1p analyses are exported for comparison.",
   "Imputation: main heatmap source tables retain NA displayed effects; grey heatmap tiles mean missing, non-estimable, insufficient n, or excluded from main display. Median-imputed limma results are retained as one model variant and are not the only sensitivity result.",
   paste0("Region inclusion: no manuscript-prioritized anatomy is used for main Fig. 4 selection. Regions require min relevant group n >= 2 for displayed contrasts and >= ", fig4_min_main_non_na_display, " displayed central effects within a metric; each heatmap then shows the top ", fig4_max_heatmap_regions, " regions ranked by maximum absolute displayed logFC. Raw P is not used as a main-display inclusion rule."),
   "Main Fig. 4 heatmaps are regional effect-size maps, not whole-brain discovery significance maps.",
-  "Nominal P-values are exploratory unless FDR survives the stated correction scope. Low-n effects are marked and should be interpreted as exploratory.",
+  "Visible significance markings use one statistic: FDR q < 0.10 within the stated correction scope. Low-n effects are marked separately as exploratory.",
   "Projection intensity and regional cFos recruitment are treated as related but distinct readouts; no causal relation is implied.",
   "Network edge comparisons use VEH_unpaired as the explicit baseline condition and are exploratory.",
   "Supplementary cell-count/intensity edge-overlap tables and plots identify thresholded region pairs shared by both readouts.",
@@ -5506,12 +5627,17 @@ sync_legacy_outputs()
 output_directory_audit <- tibble(
   output_directory = c(
     publication_fig4_fig_dir,
+    publication_fig4_panel_fig_dir,
+    publication_fig4_composite_fig_dir,
+    publication_fig4_key_fig_dir,
     publication_supp_fig_dir,
     publication_dashboard_fig_dir,
     publication_fig4_tab_dir,
     publication_supp_tab_dir,
     publication_source_tab_dir,
     publication_manifest_dir,
+    exploratory_effect_fig_dir,
+    exploratory_profile_fig_dir,
     exploratory_covariance_dir,
     exploratory_network_dir,
     exploratory_dimred_dir,
