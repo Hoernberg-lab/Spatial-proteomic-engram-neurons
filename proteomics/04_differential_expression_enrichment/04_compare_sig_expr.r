@@ -59,7 +59,6 @@
   GCT_FILE_PATH <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Datasets/gct/data/pg.matrix_filtered_pcaAdjusted_unnormalized.gct"
 
   # Folder containing differential expression results (up/down regulated lists)
-  #SIG_PATH <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Results/compareGO/BP/learning_signature/memory_ensemble/old/core_enrichment/significant_proteins/"
   SIG_PATH <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Results/compareGO/BP/learning_signature/memory_ensemble/06_Significant_Proteins/"
 
   # 1.3 Output Settings
