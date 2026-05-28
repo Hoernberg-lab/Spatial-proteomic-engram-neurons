@@ -280,16 +280,13 @@ library(ggalluvial)
 ont <- "BP"
 
 # Ensemble profiling method
-#ensemble_profiling <- "baseline_cell_type_profiling"
-ensemble_profiling <- "phenotype_within_unit"
+ensemble_profiling <- "baseline_cell_type_profiling"
 
 # Experimental condition
-#condition <- "US"
-condition <- "DG_po"
+condition <- "US"
 
 # Base project path for all input/output
-#base_project_path <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler"
-base_project_path <- "S:/Lab_Member/Tobi/Experiments/Exp9_Social-Stress/proteomics"
+base_project_path <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler"
 
 # Load log2fc data ONCE at the beginning for reuse throughout analysis
 log2fc_files_path <- file.path(base_project_path, "Datasets", "mapped", ensemble_profiling, condition)
@@ -1073,99 +1070,6 @@ if (exists("top5_up_down_df") && !is.null(top5_up_down_df) && nrow(top5_up_down_
 }
 
 # -----------------------------------------------------
-# Plot Enrichment for Selected Genes
-# -----------------------------------------------------
-
-# gene_list <- c("P55099", "Q6NXX1")
-# long_df <- combined_df %>%
-#   mutate(core_gene = strsplit(as.character(core_enrichment), "/|;|,|\\s+")) %>%
-#   unnest(core_gene)
-# filtered_df <- long_df %>%
-#   filter(core_gene %in% gene_list) %>%
-#   mutate(Description = factor(Description, levels = unique(Description)))
-# ggsave(output_plot_file, plot = plot_selected_genes, width = 8, height = 6, dpi = 300)
-#
-# # Only plot if filtered_df is not empty and NES is not all NA
-# if (nrow(filtered_df) > 0 && any(!is.na(filtered_df$NES))) {
-#   nes_min <- min(filtered_df$NES, na.rm = TRUE)
-#   nes_max <- max(filtered_df$NES, na.rm = TRUE)
-#   max_abs_nes <- max(abs(nes_min), abs(nes_max))
-#   plot_selected_genes <- ggplot(filtered_df, aes(
-#     x = Comparison,
-#     y = Description,
-#     color = NES,
-#     size = -log10(p.adjust),
-#     shape = core_gene
-#   )) +
-#     geom_point(alpha = 1) +
-#     scale_color_gradientn(
-#       colours = custom_palette(100),
-#       limits = c(-max_abs_nes, max_abs_nes),
-#       name = "NES"
-#     ) +
-#     scale_size_continuous(
-#       name = expression(-log[10](italic(P)[adj])),
-#       range = c(2, 6)
-#     ) +
-#     labs(
-#       title = "Enrichment for selected genes",
-#       x = NULL,
-#       y = NULL,
-#       shape = "Gene"
-#     ) +
-#     theme_custom(base_size = 10) +
-#     theme(axis.text.x = element_text(angle = 45, hjust = 1))
-#   output_plot_file <- file.path(subdirs$plots_main, "Plot_Selected_Genes.svg")
-#   ggsave(output_plot_file, plot = plot_selected_genes, width = 8, height = 6, dpi = 300)
-# } else {
-#   message("No data available for selected genes plot. Skipping plot generation.")
-# }
-
-# -----------------------------------------------------
-# Gene-Centric Enrichment Summary Plot
-# -----------------------------------------------------
-
-#gene_enrichment_summary <- long_df %>%
-#
-#  filter(core_gene %in% gene_list) %>%
-#  group_by(core_gene, Comparison) %>%
-#  summarise(
-#    count = n(),
-#    mean_NES = mean(NES, na.rm = TRUE),
-#    max_padj = if (all(is.na(p.adjust))) NA_real_ else min(p.adjust, na.rm = TRUE),
-#    .groups = "drop"
-#  )
-#
-#plot_gene_summary <- ggplot(gene_enrichment_summary, aes(
-#  x = Comparison,
-#  y = core_gene,
-#  size = count,
-#  fill = mean_NES
-#)) +
-#  geom_point(shape = 21, stroke = 0.2, color="black") +
-#  scale_size_continuous(
-#    name = "Occurrences",
-#    range = c(2, 8)
-#  ) +
-#  scale_fill_gradientn(
-#    colours = rev(brewer.pal(n = 7, name = "RdBu")),
-#    name = "Mean NES",
-#    limits = c(-max_abs_nes, max_abs_nes)
-#  ) +
-#  labs(
-#    title = "Gene-centric enrichment",
-#    x = NULL,
-#    y = "Gene"
-#  ) +
-#  theme_custom(base_size = 10) +
-#  theme(
-#    axis.text.x = element_text(angle = 45, hjust = 1)
-#  )
-
-#gene_summary_file <- file.path(subdirs$gene_centric, "Gene_Centric_Summary.svg")
-#ggsave(gene_summary_file, plot = plot_gene_summary, width = 5, height = 4, dpi = 300)
-
-# -----------------------------------------------------
 # Extract and Export Core Genes per Comparison
 # -----------------------------------------------------
 
@@ -1325,7 +1229,6 @@ dev.off()
 #
 # This is expected behavior and reflects the different ranking criteria.
 message("[INFO] Top/bottom 25 genes for heatmap are selected by NES (enrichment), not by log2FC (differential expression). See comments in code for details.")
-
 
 # -----------------------------------------------------
 # Select and Visualize Top 25 Up/Down Genes by NES Across All Comparisons
