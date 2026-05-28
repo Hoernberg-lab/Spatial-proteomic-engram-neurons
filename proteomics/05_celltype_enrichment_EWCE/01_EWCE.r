@@ -62,7 +62,7 @@ analysis_params <- list(
   marker_top_n = 200,
   celltype = c("mcherry", "neuron", "cfos", "neuropil"),
   conditions = c("veh-paired", "cno-paired", "veh-unpaired", "cno-unpaired"),
-  expgroup_condition_map = c("1" = "cno-paired", "2" = "veh-paired", "3" = "cno-unpaired", "4" = "veh-unpaired"),
+  expgroup_condition_map = c("1" = "cno-paired", "2" = "veh-paired", "3" = "cno-unpaired", "4" = "veh-unpaired")
 )
 
 dirs <- list(
@@ -117,6 +117,23 @@ safe_file_stem <- function(x) {
   substr(x, 1, 180)
 }
 
+condition_reference <- function() {
+  analysis_params$conditions[1]
+}
+
+condition_contrasts <- function(present_conditions) {
+  ref <- condition_reference()
+  comparison_conditions <- setdiff(analysis_params$conditions, ref)
+  comparison_conditions <- comparison_conditions[comparison_conditions %in% present_conditions]
+
+  tibble::tibble(
+    contrast = paste(comparison_conditions, ref, sep = "_vs_"),
+    case = comparison_conditions,
+    reference = ref,
+    label = paste(comparison_conditions, "vs", ref)
+  )
+}
+
 clean_gene_token <- function(x) {
   x %>%
     as.character() %>%
@@ -150,28 +167,61 @@ normalize_condition <- function(x) {
   dplyr::if_else(!is.na(mapped), mapped, x)
 }
 
-load_sample_condition_lookup <- function(metadata_path) {
+normalize_celltype <- function(x) {
+  x <- stringr::str_to_lower(as.character(x))
+  dplyr::if_else(x %in% analysis_params$celltype, x, NA_character_)
+}
+
+resolve_metadata_file <- function(metadata_path) {
   if (is.null(metadata_path) || !file.exists(metadata_path)) {
-    return(tibble::tibble(Sample = character(), AnimalID = character(), Cond_Metadata = character()))
+    return(NA_character_)
+  }
+  if (dir.exists(metadata_path)) {
+    candidates <- list.files(metadata_path, pattern = "\\.xlsx?$", full.names = TRUE, ignore.case = TRUE)
+    if (length(candidates) == 0) {
+      return(NA_character_)
+    }
+    candidates[1]
+  } else {
+    metadata_path
+  }
+}
+
+load_sample_condition_lookup <- function(metadata_path) {
+  metadata_file <- resolve_metadata_file(metadata_path)
+  if (is.na(metadata_file)) {
+    return(tibble::tibble(
+      Sample = character(),
+      AnimalID = character(),
+      Cond_Metadata = character(),
+      Celltype_Metadata = character()
+    ))
   }
 
-  meta_df <- readxl::read_excel(metadata_path, sheet = readxl::excel_sheets(metadata_path)[1]) %>%
+  meta_df <- readxl::read_excel(metadata_file, sheet = readxl::excel_sheets(metadata_file)[1]) %>%
     tibble::as_tibble()
 
   sample_col <- intersect(c("sample_id", "Sample", "sample", "SampleID"), colnames(meta_df))[1]
   animal_col <- intersect(c("AnimalID", "animal_id", "Animal", "animal"), colnames(meta_df))[1]
   cond_col <- intersect(c("Cond", "Condition", "condition", "ExpGroup", "Group", "group"), colnames(meta_df))[1]
+  celltype_col <- intersect(c("celltype", "CellType", "cell_type", "Celltype", "celltype_layer"), colnames(meta_df))[1]
 
   if (is.na(cond_col) || (is.na(sample_col) && is.na(animal_col))) {
-    warning("Sample metadata file found but no usable sample/animal condition columns were detected: ", metadata_path)
-    return(tibble::tibble(Sample = character(), AnimalID = character(), Cond_Metadata = character()))
+    warning("Sample metadata file found but no usable sample/animal condition columns were detected: ", metadata_file)
+    return(tibble::tibble(
+      Sample = character(),
+      AnimalID = character(),
+      Cond_Metadata = character(),
+      Celltype_Metadata = character()
+    ))
   }
 
   meta_df %>%
     dplyr::transmute(
       Sample = if (!is.na(sample_col)) normalize_sample_id(.data[[sample_col]]) else NA_character_,
       AnimalID = if (!is.na(animal_col)) as.character(.data[[animal_col]]) else stringr::str_match(Sample, "(?i)(?:^|_)(A[0-9]+)(?=_)")[, 2],
-      Cond_Metadata = normalize_condition(.data[[cond_col]])
+      Cond_Metadata = normalize_condition(.data[[cond_col]]),
+      Celltype_Metadata = if (!is.na(celltype_col)) normalize_celltype(.data[[celltype_col]]) else NA_character_
     ) %>%
     dplyr::filter(!is.na(Cond_Metadata), Cond_Metadata %in% analysis_params$conditions) %>%
     dplyr::distinct()
@@ -188,22 +238,27 @@ parse_sample_metadata <- function(sample_names, condition_lookup = NULL) {
     by_sample <- condition_lookup %>%
       dplyr::filter(!is.na(Sample)) %>%
       dplyr::mutate(SampleKey = normalize_sample_id(Sample)) %>%
-      dplyr::distinct(SampleKey, Cond_Metadata)
+      dplyr::distinct(SampleKey, Cond_Metadata, Celltype_Metadata)
 
     by_animal <- condition_lookup %>%
       dplyr::filter(!is.na(AnimalID)) %>%
-      dplyr::distinct(AnimalID, Cond_Animal = Cond_Metadata)
+      dplyr::distinct(AnimalID, Cond_Animal = Cond_Metadata, Celltype_Animal = Celltype_Metadata)
 
     direct_meta <- direct_meta %>%
       dplyr::left_join(by_sample, by = "SampleKey") %>%
       dplyr::left_join(by_animal, by = "AnimalID")
   } else {
     direct_meta <- direct_meta %>%
-      dplyr::mutate(Cond_Metadata = NA_character_, Cond_Animal = NA_character_)
+      dplyr::mutate(
+        Cond_Metadata = NA_character_,
+        Celltype_Metadata = NA_character_,
+        Cond_Animal = NA_character_,
+        Celltype_Animal = NA_character_
+      )
   }
 
   resolved_meta <- direct_meta %>%
-    dplyr::select(Sample, AnimalID, Cond_Metadata, Cond_Animal) %>%
+    dplyr::select(Sample, AnimalID, Cond_Metadata, Celltype_Metadata, Cond_Animal, Celltype_Animal) %>%
     dplyr::distinct() %>%
     dplyr::mutate(
       Cond_From_Name = extract_sample_token(Sample, analysis_params$conditions, case = "lower"),
@@ -212,16 +267,18 @@ parse_sample_metadata <- function(sample_names, condition_lookup = NULL) {
         normalize_condition(stringr::str_extract(stringr::str_to_lower(Sample), paste(analysis_params$conditions, collapse = "|"))),
         Cond_From_Name
       ),
-      Cond_Resolved = dplyr::coalesce(Cond_From_Name, Cond_Metadata, Cond_Animal)
+      Celltype_From_Name = extract_sample_token(Sample, analysis_params$celltype, case = "lower"),
+      Cond_Resolved = dplyr::coalesce(Cond_From_Name, Cond_Metadata, Cond_Animal),
+      Celltype_Resolved = dplyr::coalesce(Celltype_From_Name, Celltype_Metadata, Celltype_Animal)
     ) %>%
-    dplyr::select(Sample, AnimalID, Cond_Resolved) %>%
+    dplyr::select(Sample, AnimalID, Cond_Resolved, Celltype_Resolved) %>%
     dplyr::right_join(tibble::tibble(Sample = sample_names), by = "Sample")
 
   resolved_meta %>%
     dplyr::mutate(
-      Region = extract_sample_token(Sample, analysis_params$regions, case = "upper"),
-      Layer = extract_sample_token(Sample, analysis_params$layers, case = "lower"),
-      Stratum = dplyr::if_else(is.na(Layer), Region, paste(Region, Layer, sep = "_")),
+      Stratum = normalize_celltype(Celltype_Resolved),
+      Region = Stratum,
+      Layer = NA_character_,
       Cond = factor(Cond_Resolved, levels = analysis_params$conditions),
       Batch = stringr::str_extract(Sample, "(?i)(batch|plate|run)[-_]?[A-Za-z0-9]+")
     )
@@ -267,23 +324,29 @@ run_limma_stratum <- function(expr_mat, sample_meta, stratum) {
   meta$Cond <- droplevels(factor(meta$Cond, levels = analysis_params$conditions))
   present_conditions <- levels(meta$Cond)[levels(meta$Cond) %in% meta$Cond]
 
-  if (!"con" %in% present_conditions || length(present_conditions) < 2) {
+  if (!condition_reference() %in% present_conditions || length(present_conditions) < 2) {
     return(tibble::tibble())
   }
 
   design <- stats::model.matrix(~ 0 + Cond, data = meta)
-  colnames(design) <- sub("^Cond", "", colnames(design))
-
-  contrast_names <- c()
-  if ("sus" %in% colnames(design)) contrast_names <- c(contrast_names, "sus - con")
-  if ("res" %in% colnames(design)) contrast_names <- c(contrast_names, "res - con")
-  if (length(contrast_names) == 0) return(tibble::tibble())
-
-  contrast_matrix <- limma::makeContrasts(contrasts = contrast_names, levels = design)
-  colnames(contrast_matrix) <- c(
-    if ("sus - con" %in% contrast_names) "Sus_vs_Con",
-    if ("res - con" %in% contrast_names) "Res_vs_Con"
+  design_key <- tibble::tibble(
+    condition = levels(meta$Cond),
+    design_col = make.names(levels(meta$Cond), unique = TRUE)
   )
+  colnames(design) <- design_key$design_col[match(sub("^Cond", "", colnames(design)), design_key$condition)]
+
+  contrast_tbl <- condition_contrasts(present_conditions) %>%
+    dplyr::left_join(design_key, by = c("case" = "condition")) %>%
+    dplyr::rename(case_col = design_col) %>%
+    dplyr::left_join(design_key, by = c("reference" = "condition")) %>%
+    dplyr::rename(reference_col = design_col) %>%
+    dplyr::filter(!is.na(case_col), !is.na(reference_col)) %>%
+    dplyr::mutate(expression = paste(case_col, reference_col, sep = " - "))
+
+  if (nrow(contrast_tbl) == 0) return(tibble::tibble())
+
+  contrast_matrix <- limma::makeContrasts(contrasts = contrast_tbl$expression, levels = design)
+  colnames(contrast_matrix) <- contrast_tbl$contrast
 
   fit <- limma::lmFit(x, design)
   fit2 <- limma::eBayes(limma::contrasts.fit(fit, contrast_matrix), trend = TRUE, robust = TRUE)
@@ -314,9 +377,8 @@ make_baseline_targets <- function(baseline_mat, top_n_values) {
     target_parts <- stringr::str_split_fixed(target, "__", 2)
     stratum <- target_parts[, 1]
     metric <- target_parts[, 2]
-    region <- stringr::str_extract(stratum, paste(analysis_params$regions, collapse = "|"))
-    layer <- stringr::str_match(stratum, paste0("_(?:", paste(analysis_params$layers, collapse = "|"), ")$"))[, 1]
-    layer <- stringr::str_remove(layer, "^_")
+    region <- stratum
+    layer <- NA_character_
     dplyr::bind_rows(lapply(top_n_values, function(top_n) {
       tibble::tibble(
         Target = target,
@@ -762,12 +824,10 @@ observed_strata <- unique(stats::na.omit(c(results_all$Stratum, sample_meta$Stra
 stratum_order <- c(stratum_order[stratum_order %in% observed_strata], sort(setdiff(observed_strata, stratum_order)))
 
 format_contrast_label <- function(x) {
-  dplyr::recode(
-    as.character(x),
-    "Sus_vs_Con" = "Sus vs Con",
-    "Res_vs_Con" = "Res vs Con",
-    .default = as.character(x)
-  )
+  x <- as.character(x)
+  x <- stringr::str_replace(x, "_vs_", " vs ")
+  x <- stringr::str_replace_all(x, "_", "-")
+  x
 }
 
 format_metric_label <- function(contrast, direction) {
@@ -778,6 +838,15 @@ cap_signed_value <- function(x, limit = 10) {
   pmax(pmin(x, limit), -limit)
 }
 
+metric_label_levels <- c(
+  analysis_params$conditions,
+  as.vector(t(outer(
+    format_contrast_label(condition_contrasts(analysis_params$conditions)$contrast),
+    c("Up", "Down"),
+    paste
+  )))
+)
+
 primary_results <- primary_results %>%
   dplyr::mutate(
     Stratum = factor(Stratum, levels = stratum_order),
@@ -786,7 +855,7 @@ primary_results <- primary_results %>%
     MetricLabel = dplyr::if_else(AnalysisType == "Baseline", as.character(Metric), MetricLabel),
     MetricLabel = factor(
       MetricLabel,
-      levels = c("con", "res", "sus", "Sus vs Con Up", "Sus vs Con Down", "Res vs Con Up", "Res vs Con Down")
+      levels = unique(metric_label_levels)
     ),
     SignedSig_Global_Capped = cap_signed_value(SignedSig_Global)
   )

@@ -1641,6 +1641,53 @@ for (metric in metrics_to_analyse) {
 # -----------------------------
 # 7. Region-level limma contrasts
 # -----------------------------
+build_region_measurement_table <- function(data, metric) {
+  metric_sym <- sym(metric)
+
+  df <- data %>%
+    select(SampleID, Condition, Class, Annotation, Abbreviation, Level, RegionLabel, RegionKey, value = !!metric_sym) %>%
+    mutate(value = safe_log1p(value)) %>%
+    filter(!is.na(Condition))
+
+  sample_meta <- df %>%
+    distinct(SampleID, Condition) %>%
+    arrange(factor(as.character(Condition), levels = levels(long$Condition)), SampleID) %>%
+    mutate(Condition = factor(as.character(Condition), levels = levels(long$Condition)))
+
+  first_present <- function(x) {
+    x <- x[!is.na(x) & x != ""]
+    if (length(x) == 0) NA else x[[1]]
+  }
+
+  region_meta <- df %>%
+    group_by(RegionKey) %>%
+    summarise(
+      Class = first_present(Class),
+      Annotation = first_present(Annotation),
+      Abbreviation = first_present(Abbreviation),
+      Level = {
+        level_values <- Level[!is.na(Level)]
+        if (length(level_values) == 0) NA_integer_ else level_values[[1]]
+      },
+      RegionLabel = first_present(RegionLabel),
+      .groups = "drop"
+    ) %>%
+    arrange(RegionKey)
+
+  wide <- df %>%
+    group_by(RegionKey, SampleID) %>%
+    summarise(value = mean(value, na.rm = TRUE), .groups = "drop") %>%
+    mutate(value = if_else(is.nan(value), NA_real_, value)) %>%
+    pivot_wider(names_from = SampleID, values_from = value) %>%
+    right_join(region_meta %>% distinct(RegionKey), by = "RegionKey") %>%
+    arrange(RegionKey)
+
+  wide %>%
+    left_join(region_meta, by = "RegionKey") %>%
+    mutate(metric = .env$metric, .before = 1) %>%
+    select(metric, RegionKey, Class, Annotation, Abbreviation, Level, RegionLabel, all_of(sample_meta$SampleID))
+}
+
 run_limma_region_contrasts <- function(data, metric) {
   metric_sym <- sym(metric)
 
@@ -1784,7 +1831,9 @@ run_limma_region_contrasts <- function(data, metric) {
 }
 
 contrast_tables <- list()
+measurement_tables <- list()
 for (metric in metrics_to_analyse) {
+  measurement_tables[[metric]] <- build_region_measurement_table(long, metric)
   contrast_tables[[metric]] <- run_limma_region_contrasts(long, metric)
 }
 
@@ -1792,8 +1841,36 @@ normalized_metrics_to_analyse <- c("Cell_Count_norm", "Intensity_norm")
 normalized_metric_lookup <- c(Cell_Count_norm = "Cell_Count", Intensity_norm = "Intensity")
 
 contrast_tables_normalized <- list()
+measurement_tables_normalized <- list()
 for (metric in normalized_metrics_to_analyse) {
+  measurement_tables_normalized[[metric]] <- build_region_measurement_table(long, metric)
   contrast_tables_normalized[[metric]] <- run_limma_region_contrasts(long, metric)
+}
+
+for (metric in names(measurement_tables)) {
+  readr::write_csv(
+    measurement_tables[[metric]],
+    file.path(out_dir, "tables", paste0("region_measurement_table_", metric, "_log1p.csv"))
+  )
+  readr::write_csv(
+    measurement_tables[[metric]],
+    file.path(legacy_tab_dir, paste0("region_measurement_table_", metric, "_log1p.csv"))
+  )
+}
+
+for (metric in names(measurement_tables_normalized)) {
+  readr::write_csv(
+    measurement_tables_normalized[[metric]],
+    file.path(out_dir, "tables", paste0("region_measurement_table_", metric, "_log1p.csv"))
+  )
+  readr::write_csv(
+    measurement_tables_normalized[[metric]],
+    file.path(legacy_tab_dir, paste0("region_measurement_table_", metric, "_log1p.csv"))
+  )
+  readr::write_csv(
+    measurement_tables_normalized[[metric]],
+    file.path(qc_normalization_dir, paste0("region_measurement_table_", metric, "_log1p.csv"))
+  )
 }
 
 normalization_comparison <- purrr::imap_dfr(normalized_metric_lookup, function(raw_metric, norm_metric) {
@@ -1842,6 +1919,31 @@ openxlsx::write.xlsx(
 openxlsx::write.xlsx(
   c(contrast_tables_normalized, list(normalization_comparison = normalization_comparison)),
   file.path(qc_normalization_dir, "region_group_contrasts_limma_normalized_log1p.xlsx"),
+  overwrite = TRUE
+)
+openxlsx::write.xlsx(
+  measurement_tables,
+  file.path(out_dir, "tables", "region_measurement_tables_log1p.xlsx"),
+  overwrite = TRUE
+)
+openxlsx::write.xlsx(
+  measurement_tables,
+  file.path(legacy_tab_dir, "region_measurement_tables_log1p.xlsx"),
+  overwrite = TRUE
+)
+openxlsx::write.xlsx(
+  measurement_tables_normalized,
+  file.path(out_dir, "tables", "region_measurement_tables_normalized_log1p.xlsx"),
+  overwrite = TRUE
+)
+openxlsx::write.xlsx(
+  measurement_tables_normalized,
+  file.path(legacy_tab_dir, "region_measurement_tables_normalized_log1p.xlsx"),
+  overwrite = TRUE
+)
+openxlsx::write.xlsx(
+  measurement_tables_normalized,
+  file.path(qc_normalization_dir, "region_measurement_tables_normalized_log1p.xlsx"),
   overwrite = TRUE
 )
 
