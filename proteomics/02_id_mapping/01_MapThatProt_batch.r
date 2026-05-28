@@ -41,8 +41,7 @@ cat("Target Comparison:", mapped_comparisons, "\n")
 cat("Mapping Direction:", ifelse(map_reverse, "reverse", "forward"), "\n")
 
 # Define root file paths
-working_dir <- "S:/Lab_Member/Tobi/Experiments/Exp9_Social-Stress/proteomics/"
-#working_dir <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/"
+working_dir <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/"
 cat("Working Directory:", working_dir, "\n")
 comparison_dir <- if (isTRUE(map_reverse)) file.path(mapped_comparisons, "reverse") else file.path(mapped_comparisons, "forward")
 raw_dir <- file.path(working_dir, "Datasets", "raw", comparison_dir)
