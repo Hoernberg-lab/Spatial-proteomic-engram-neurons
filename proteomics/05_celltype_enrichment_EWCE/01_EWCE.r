@@ -45,7 +45,7 @@ invisible(lapply(bioc_packages, install_and_load, bioc = TRUE))
 # ==========================================
 
 data_path     <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Datasets/gct/data/imputed_data.xlsx"
-base_results  <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Results/
+base_results  <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Results/EWCE_E9_Results"
 sample_metadata_path <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Datasets/sample_metadata/"
 
 # create folders if needed and define parameters
@@ -630,8 +630,17 @@ if (all(is.na(sample_meta$Cond))) {
     "or set sample_metadata_path to a metadata file with AnimalID/sample_id and ExpGroup/Condition columns."
   )
 }
+if (all(is.na(sample_meta$Stratum))) {
+  stop(
+    "No sample cell types could be resolved. Provide celltype tokens in sample names ",
+    "or set sample_metadata_path to a metadata file with sample_id/AnimalID and celltype columns."
+  )
+}
 if (any(is.na(sample_meta$Cond))) {
   warning(sum(is.na(sample_meta$Cond)), " sample(s) have no resolved condition and will be excluded from contrasts.")
+}
+if (any(is.na(sample_meta$Stratum))) {
+  warning(sum(is.na(sample_meta$Stratum)), " sample(s) have no resolved celltype and will be excluded from signatures.")
 }
 sample_meta_qc <- sample_meta %>%
   dplyr::count(Stratum, Region, Layer, Cond, name = "N_Samples") %>%
@@ -676,7 +685,7 @@ de_tbl <- dplyr::bind_rows(lapply(analysis_strata, function(stratum) {
 }))
 
 if (nrow(de_tbl) == 0) {
-  stop("No differential contrasts were created. Check sample names for region, optional layer, and condition labels.")
+  stop("No differential contrasts were created. Check sample names or metadata for celltype and condition labels.")
 }
 
 target_gene_tbl <- dplyr::bind_rows(
