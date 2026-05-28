@@ -194,9 +194,9 @@ read_config <- function(config_path) {
       config_file = config_path
     ),
     paths = list(
-      mapped_dir = "S:/Lab_Member/Tobi/Experiments/Exp9_Social-Stress/proteomics/Datasets/mapped/neuron_neuropil/forward/per_file",
-      working_base = "S:/Lab_Member/Tobi/Experiments/Exp9_Social-Stress/proteomics",
-      mapped_data_base = "S:/Lab_Member/Tobi/Experiments/Exp9_Social-Stress/proteomics/Datasets/mapped/neuron_neuropil/forward/per_file",
+      mapped_dir = "S:\Lab_Member\Tobi\Experiments\Collabs\Neha\clusterProfiler\Datasets\mapped\learning_signature\memory_ensemble",
+      working_base = "S:\Lab_Member\Tobi\Experiments\Collabs\Neha\clusterProfiler",
+      mapped_data_base = "S:\Lab_Member\Tobi\Experiments\Collabs\Neha\clusterProfiler\Datasets\mapped\learning_signature\memory_ensemble",
       background_universe_file = ""
     ),
     optional_inputs = list(
@@ -448,12 +448,12 @@ if (length(comparison_list) == 0) {
   stop("No valid comparison files found in: ", mapped_dir)
 }
 
-#working_base <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler"
-working_base <- cfg$paths$working_base
+working_base <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler"
+#working_base <- cfg$paths$working_base
 
 working_dir <- working_base
-mapped_data_base <- cfg$paths$mapped_data_base
-#mapped_data_base <- file.path(working_base, "Datasets/mapped/baseline_cell_type_profiling/US")
+#mapped_data_base <- cfg$paths$mapped_data_base
+mapped_data_base <- file.path(working_base, "Datasets/mapped/baseline_cell_type_profiling/US")
 organism <- cfg$analysis$organism
 ont <- cfg$analysis$ontology
 
