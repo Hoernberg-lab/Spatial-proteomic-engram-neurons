@@ -1,190 +1,148 @@
 # Proteomic analysis
 
-This directory contains the proteomics analysis code for the `topohl/Neha` project.
+## Overview
 
-The README is intended as an entry point for reproducing and extending the analysis. It documents the expected workflow, data assumptions, output conventions, and quality-control checks. The exact script names should be kept synchronized with the files in this folder as the analysis develops.
+This repository contains the analysis code used to generate the proteomics results associated with the linked publication.
 
-## Purpose
+The goal of this repository is not to provide a general-purpose proteomics framework but to make the computational analysis transparent, reproducible, and reusable.
 
-The analysis in this folder is designed to process, quality-control, model, and visualize proteomics data. Typical use cases include:
+The repository is intended to allow readers to:
 
-- importing processed protein-intensity matrices and associated sample metadata;
-- checking sample-level and protein-level quality metrics;
-- normalizing or transforming abundance values where appropriate;
-- running differential-abundance or group-comparison analyses;
-- summarizing results in tables suitable for downstream interpretation;
-- generating exploratory and publication-oriented figures;
-- preparing ranked protein lists or gene-symbol tables for enrichment analysis.
+- reproduce the analyses reported in the manuscript;
+- inspect preprocessing and statistical decisions;
+- regenerate publication figures and summary tables;
+- reuse selected analysis modules for related datasets.
 
-## Expected project layout
+## Relation to the publication
 
-A recommended structure is:
+This repository accompanies the associated manuscript.
 
-```text
-proteomic_analysis/
-├── README.md
-├── data/                 # local input data; usually not committed
-├── metadata/             # sample annotation files, if separated from data
-├── scripts/              # analysis scripts
-├── R/                    # reusable R helper functions, if present
-├── results/              # generated output tables and figures
-└── logs/                 # optional run logs
-```
+Please cite the publication when using this code or derived analyses.
 
-If the repository uses a different layout, prefer the existing layout and update this section accordingly.
+Publication:
 
-## Inputs
+> [Authors]. [Title]. [Journal]. [Year].
+> DOI: [insert DOI]
 
-The analysis usually requires two input layers:
+Repository version used for publication:
 
-1. A protein-level abundance matrix, with proteins or protein groups as rows and samples as columns.
-2. A sample-metadata table, with one row per sample and variables such as experimental group, batch, sex, tissue, region, layer, or other study-specific annotations.
+> commit: [insert publication commit/tag]
 
-Recommended minimum metadata columns:
+## Scientific scope
 
-| Column | Meaning |
-|---|---|
-| `sample_id` | Unique sample identifier matching the abundance matrix column names. |
-| `group` | Experimental group or condition. |
-| `batch` | Processing or acquisition batch, if applicable. |
-| `sex` | Biological sex, if relevant to the design. |
-| `region` | Brain region or anatomical unit, if applicable. |
-| `layer` | Layer or subregion annotation, if applicable. |
+This analysis processes quantitative proteomics data and converts protein abundance measurements into interpretable biological results.
 
-Assumption: raw or large intermediate proteomics files are not tracked in Git unless they are small and non-sensitive. Store large data files externally or add them to `.gitignore`.
+The repository contains code for:
+
+- data import and preprocessing;
+- quality control and sample validation;
+- normalization and filtering;
+- statistical comparison between biological conditions;
+- generation of publication figures;
+- export of supplementary tables.
+
+Unless otherwise stated in the manuscript, this repository should be considered the computational implementation of the Methods section.
 
 ## Reproducibility
 
-Before running the analysis, record the R version and package versions:
+Reproducibility should start from the exact repository state associated with the manuscript.
+
+Recommended procedure:
+
+```bash
+git clone https://github.com/topohl/Neha.git
+cd Neha
+git checkout [publication-tag]
+```
+
+Record:
 
 ```r
 sessionInfo()
 ```
 
-Recommended packages for typical R-based proteomics workflows include:
+If available, use a locked environment:
 
 ```r
-install.packages(c(
-  "tidyverse",
-  "readxl",
-  "openxlsx",
-  "limma",
-  "ggplot2",
-  "pheatmap",
-  "janitor",
-  "here"
-))
+renv::restore()
 ```
 
-Use Bioconductor for packages such as `limma` when needed:
+## Data availability
 
-```r
-if (!requireNamespace("BiocManager", quietly = TRUE)) {
-  install.packages("BiocManager")
-}
-BiocManager::install("limma")
-```
+Raw and processed proteomics data may be deposited separately from this repository.
 
-For a fully reproducible project, consider adding an `renv.lock` file:
+Preferred order of reference:
 
-```r
-install.packages("renv")
-renv::init()
-renv::snapshot()
-```
+1. manuscript supplementary information;
+2. public proteomics repository (PRIDE / ProteomeXchange);
+3. processed tables included in this repository.
 
-## Suggested workflow
+Data accession:
 
-Run scripts from the repository root unless a script explicitly documents another working directory.
+> [insert accession]
 
-A typical workflow is:
+Large intermediate files are intentionally excluded from Git.
 
-1. Import abundance data and metadata.
-2. Validate sample-name matching between matrix and metadata.
-3. Filter proteins with excessive missingness or low detection.
-4. Transform and normalize abundance values if this has not already been done upstream.
-5. Perform exploratory QC: missingness, PCA, sample clustering, batch structure, group separation.
-6. Fit statistical models for predefined biological contrasts.
-7. Export result tables with effect sizes, test statistics, raw p-values, and adjusted p-values.
-8. Generate figures for QC, differential-abundance summaries, heatmaps, and enrichment-ready protein lists.
+## Analysis workflow
 
-Example command pattern:
+The exact script execution order is defined by the repository structure.
 
-```bash
-Rscript proteomic_analysis/scripts/01_import_qc.R
-Rscript proteomic_analysis/scripts/02_differential_analysis.R
-Rscript proteomic_analysis/scripts/03_visualization.R
-```
-
-Adjust these commands to the actual script names in this directory.
-
-## Statistical notes
-
-For proteomics group comparisons, avoid relying only on nominal p-values, especially when sample size is small. Report:
-
-- effect size or log2 fold change;
-- standard error or confidence interval where available;
-- raw p-value;
-- multiple-testing-adjusted p-value;
-- number of quantified samples per group;
-- missingness per protein and per group.
-
-If batch, sex, region, or layer are part of the design, include them explicitly in the model rather than treating all samples as exchangeable. For small-n analyses, interpret enrichment and differential-abundance results as evidence-weighted and exploratory unless independently validated.
-
-## Output conventions
-
-Recommended result folders:
+Conceptually, the workflow follows:
 
 ```text
-results/
-├── qc/
-├── tables/
-├── figures/
-├── enrichment_inputs/
-└── logs/
+Input data
+    ↓
+Quality control
+    ↓
+Filtering / preprocessing
+    ↓
+Statistical analysis
+    ↓
+Biological interpretation
+    ↓
+Publication figures and supplementary tables
 ```
 
-Recommended file formats:
+Users reproducing results should preserve the original analysis order.
 
-- `.xlsx` for human-readable result workbooks;
-- `.csv` or `.tsv` for machine-readable tables;
-- `.svg` or `.pdf` for vector figures;
-- `.txt` or `.rds` for ranked lists or reusable R objects.
+## Outputs
 
-## Quality-control checklist
+Expected outputs include:
 
-Before interpreting biological results, verify:
+- main figures;
+- supplementary figures;
+- supplementary result tables;
+- intermediate processed matrices;
+- enrichment-ready exports.
 
-- sample IDs match exactly between metadata and abundance matrix;
-- group labels and factor levels are correct;
-- missingness is not strongly confounded with group or batch;
-- PCA or clustering does not reveal sample swaps or obvious outliers;
-- batch effects are inspected and, where justified, modeled or corrected;
-- multiple-testing correction is applied across the relevant family of tests;
-- exported tables contain enough information to reproduce contrasts.
+Figures included in the manuscript should be generated from this repository without manual editing where possible.
 
-## Version-control recommendations
+## Interpretation notes
 
-Commit:
+This repository contains analytical implementation—not necessarily all biological interpretation.
 
-- analysis scripts;
-- helper functions;
-- small example metadata files if non-sensitive;
-- documentation;
-- final lightweight result summaries when appropriate.
+Authoritative definitions for:
 
-Do not commit:
+- cohort definitions,
+- inclusion/exclusion criteria,
+- statistical hypotheses,
+- endpoint definitions,
+- biological conclusions
 
-- large raw mass-spectrometry files;
-- private or identifiable sample metadata;
-- temporary cache files;
-- machine-specific absolute paths;
-- generated figures or tables unless they are intentionally versioned outputs.
+remain those described in the manuscript.
 
-## TODO
+## Repository philosophy
 
-- Replace placeholder script names in the workflow section with the actual file names.
-- Add exact input file names and required metadata columns.
-- Add a short description of each analysis script.
-- Add expected output file names.
-- Add `renv` or another environment lockfile if strict reproducibility is required.
+Publication repositories should prioritize:
+
+- reproducibility;
+- traceability;
+- explicit assumptions;
+- deterministic outputs;
+- minimal hidden manual processing.
+
+## Contact
+
+Questions, corrections, or reproducibility issues may be submitted through GitHub Issues.
+
+If you identify discrepancies between repository outputs and the publication, treat the publication text and deposited datasets as primary references and report the inconsistency.
