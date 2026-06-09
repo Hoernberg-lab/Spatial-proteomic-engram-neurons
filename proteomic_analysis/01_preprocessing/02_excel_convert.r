@@ -8,10 +8,10 @@ library(tools)
 mode <- "folder" # or "folder"
 
 # Define file paths
-file_path <- "S:/Lab_Member/Tobi/Experiments/Exp9_Social-Stress/proteomics/Datasets/imputed/pg_matrix_groupfiltered_70percentvalid_imputed_updated_Feb2026.xlsx"
-folder_path <- "S:/Lab_Member/Tobi/Experiments/Exp9_Social-Stress/proteomics/Datasets/pg_matrix/imputed/grouped"
-metadata_path <- "S:/Lab_Member/Tobi/Experiments/Exp9_Social-Stress/proteomics/Datasets/metadata/TPE9_sample_metadata_males.xlsx"
-output_dir <- "S:/Lab_Member/Tobi/Experiments/Exp9_Social-Stress/proteomics/Datasets/morpheus"
+file_path <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Datasets/gct/data/pg.matrix_filtered_pcaAdjusted_unnormalized.xlsx"
+folder_path <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Datasets/gct/data/imputed/grouped"
+metadata_path <- ""
+output_dir <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Datasets/gct/data/morpheus"
 
 # Read metadata
 metadata <- read_excel(metadata_path)

@@ -25,12 +25,12 @@ use_label_map <- FALSE   # TRUE = con/res/sus mapping
 # Input
 # -------------------------------
 
-setwd("S:/Lab_Member/Tobi/Experiments/Exp9_Social-Stress/proteomics/Datasets")
+setwd("S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/")
 
-input_file <- "20260218-pgmatrix-imputed-neuron-neuropil-180samples-missing70pct-with-metadata_Two-sample_mod_T_2026-04-30-transformed-p-val_n27x5054_merged_missing"
+input_file <- "pg.matrix_Two-sample_mod_T_2025-12-15-transformed-p-val_n120x5349"
 
 gct_path <- file.path(
-  "S:/Lab_Member/Tobi/Experiments/Exp9_Social-Stress/proteomics/Datasets/protigy_output/neuron_neuropil",
+  "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Datasets/gct/data",
   paste0(input_file, ".gct")
 )
 
