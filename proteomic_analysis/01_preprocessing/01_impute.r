@@ -2,6 +2,7 @@ library(readxl)
 library(readr)
 library(dplyr)
 library(writexl)
+source(file.path("R", "analysis_labels.R"))
 
 # Paths
 metadata_path <- ""
@@ -10,6 +11,9 @@ output_dir <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Datas
 
 # Read metadata
 metadata <- read_excel(metadata_path)
+if (!"sample_class" %in% names(metadata)) {
+    metadata$sample_class <- parse_sample_class(metadata$sample_id)
+}
 
 # Exclude rows where 'exclude' is TRUE
 metadata <- metadata %>% filter(is.na(exclude) | exclude != TRUE)
@@ -67,24 +71,23 @@ get_date_str <- function() {
 }
 
 # Helper function to create scientific filenames
-make_filename <- function(celltype_layer, n_samples, n_proteins, method = "normal", missing_thresh = 0.7) {
-    # Clean celltype_layer for filename
-    celltype_layer_clean <- gsub("[^A-Za-z0-9]+", "_", celltype_layer)
+make_filename <- function(sample_class, n_samples, n_proteins, method = "normal", missing_thresh = 0.7) {
+    sample_class_clean <- gsub("[^A-Za-z0-9]+", "_", sample_class)
     date_str <- get_date_str()
     paste0(
         date_str, "_",
         "pgmatrix_imputed_",
-        celltype_layer_clean,
+        sample_class_clean,
         "_", n_samples, "samples",
         "_missing", missing_thresh*100, "pct.xlsx"
     )
 }
 
-# Split by celltype_layer and process each subset
-for (celltype_layer in unique(metadata$celltype_layer)) {
-    # Get sample_ids for this celltype_layer
+# Split by sample_class and process each subset
+for (sample_class in unique(metadata$sample_class)) {
+    # Get sample_ids for this sample_class
     subset_sample_ids <- metadata %>%
-        filter(celltype_layer == !!celltype_layer) %>%
+        filter(sample_class == !!sample_class) %>%
         pull(sample_id)
     subset_sample_ids <- intersect(subset_sample_ids, common_sample_ids)
 
@@ -121,7 +124,7 @@ for (celltype_layer in unique(metadata$celltype_layer)) {
     # Create scientific filename
     n_samples <- length(subset_sample_ids)
     n_proteins <- nrow(imputed_df)
-    filename <- make_filename(celltype_layer, n_samples, n_proteins)
+    filename <- make_filename(sample_class, n_samples, n_proteins)
     output_path <- file.path(output_dir, filename)
 
     # Write output

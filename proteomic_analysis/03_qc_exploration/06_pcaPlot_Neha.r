@@ -107,7 +107,7 @@ read_gct <- function(path) {
     sample_ids <- line3_parts[-1]
     
     # Lines 4-12: metadata (9 rows total)
-    # sampleNumber, shortname, plate, group2, AnimalID, ReplicateGroup, celltype, ExpGroup, celltype_group
+    # sampleNumber, shortname, plate, replicate_unit, AnimalID, ReplicateGroup, sample_class, condition_code, sample_class_group
     meta_lines <- all_lines[4:12]
     meta_split <- lapply(meta_lines, function(x) strsplit(x, "\t")[[1]])
     
@@ -202,15 +202,15 @@ meta             <- meta[rownames(pca$x), , drop = FALSE]
 stopifnot(identical(rownames(meta), rownames(pca$x)))
 
 # Derived labels based on actual metadata fields
-# Available fields: sampleNumber, shortname, plate, group2, AnimalID, ReplicateGroup, celltype, ExpGroup, celltype_group
-if ("celltype" %in% names(meta) && "group2" %in% names(meta)) {
-    meta$celltype_group2 <- paste(meta$celltype, meta$group2, sep = "_")
+# Available fields: sampleNumber, shortname, plate, replicate_unit, AnimalID, ReplicateGroup, sample_class, condition_code, sample_class_group
+if ("sample_class" %in% names(meta) && "replicate_unit" %in% names(meta)) {
+    meta$sample_class_replicate_unit <- paste(meta$sample_class, meta$replicate_unit, sep = "_")
 }
-if ("celltype" %in% names(meta) && "ExpGroup" %in% names(meta)) {
-    meta$celltype_ExpGroup <- paste(meta$celltype, meta$ExpGroup, sep = "_")
+if ("sample_class" %in% names(meta) && "condition_code" %in% names(meta)) {
+    meta$sample_class_condition <- paste(meta$sample_class, meta$condition_code, sep = "_")
 }
-if ("ReplicateGroup" %in% names(meta) && "celltype" %in% names(meta)) {
-    meta$ReplicateGroup_celltype <- paste(meta$ReplicateGroup, meta$celltype, sep = "_")
+if ("ReplicateGroup" %in% names(meta) && "sample_class" %in% names(meta)) {
+    meta$ReplicateGroup_sample_class <- paste(meta$ReplicateGroup, meta$sample_class, sep = "_")
 }
 
 # ================== Minimal modern styling ==================
@@ -315,7 +315,7 @@ plot_and_save_group <- function(key, title_prefix, out_file, point_size = 8) {
 
 # ================== Generate and save base plots (SVG) ==================
 plot_and_save_group("ReplicateGroup",       "PCA", "pca_by_replicate_group.svg")
-plot_and_save_group("celltype",             "PCA", "pca_by_celltype.svg")
+plot_and_save_group("sample_class",             "PCA", "pca_by_sample_class.svg")
 
 # Export parsed metadata
 save_table("tables/meta", "sample_metadata_parsed.csv", meta, row.names = TRUE)
@@ -343,7 +343,7 @@ p_cum <- ggplot(df_scree, aes(PC, Cumulative)) +
   theme_pca_min() + labs(title="Cumulative Variance", x="Principal Component", y="Cumulative Fraction")
 save_plot("plots/variance", "pca_cumulative_variance.svg", p_cum)
 
-# 2) PC ~ metadata ANOVA with effect sizes (celltype and ExpGroup), robust and always writes a file
+# 2) PC ~ metadata ANOVA with effect sizes (sample_class and condition_code), robust and always writes a file
 pc_df <- as.data.frame(pca$x)
 pc_df$sample <- rownames(pc_df)
 pc_meta <- cbind(pc_df[, "sample", drop = FALSE], 
@@ -351,7 +351,7 @@ pc_meta <- cbind(pc_df[, "sample", drop = FALSE],
                  meta[rownames(pc_df), , drop = FALSE])
 
 # Candidate factors
-cand_vars <- intersect(c("celltype","ExpGroup"), names(pc_meta))
+cand_vars <- intersect(c("sample_class","condition_code"), names(pc_meta))
 if (length(cand_vars)) {
     pc_meta[cand_vars] <- lapply(pc_meta[cand_vars], function(x) {
         x <- trim_ws(as.character(x)); x[x == ""] <- NA; factor(x)
@@ -466,53 +466,53 @@ if (!is.null(um)) {
     invisible(p)
   }
   plot_umap_group("ReplicateGroup", "umap_by_replicate_group.svg")
-  plot_umap_group("celltype",       "umap_by_celltype.svg")
+  plot_umap_group("sample_class",       "umap_by_sample_class.svg")
 }
 # detect switched samples / outliers based on umap
 if (!is.null(um)) {
-    # Calculate celltype group centers in UMAP space using median
-    celltype_centers <- aggregate(um, by = list(celltype = meta[rownames(um), "celltype"]), FUN = median)
-    rownames(celltype_centers) <- celltype_centers$celltype
-    celltype_centers$celltype <- NULL
+    # Calculate sample_class group centers in UMAP space using median
+    sample_class_centers <- aggregate(um, by = list(sample_class = meta[rownames(um), "sample_class"]), FUN = median)
+    rownames(sample_class_centers) <- sample_class_centers$sample_class
+    sample_class_centers$sample_class <- NULL
     
-    # Calculate distance of each sample to its own celltype center
+    # Calculate distance of each sample to its own sample_class center
     sample_distances <- sapply(rownames(um), function(sample) {
-        sample_celltype <- meta[sample, "celltype"]
-        if (is.na(sample_celltype)) return(NA_real_)
+        sample_sample_class <- meta[sample, "sample_class"]
+        if (is.na(sample_sample_class)) return(NA_real_)
         
-        center <- as.numeric(celltype_centers[sample_celltype, ])
+        center <- as.numeric(sample_class_centers[sample_sample_class, ])
         sample_coords <- as.numeric(um[sample, ])
         
         # Euclidean distance to center
         sqrt(sum((sample_coords - center)^2))
     })
     
-    # Identify outliers per celltype (samples far from their own group center)
+    # Identify outliers per sample_class (samples far from their own group center)
     outlier_samples <- character(0)
     outlier_info <- list()
     
-    for (ct in unique(meta$celltype)) {
+    for (ct in unique(meta$sample_class)) {
         if (is.na(ct)) next
         
-        samples_in_celltype <- rownames(meta)[meta$celltype == ct & !is.na(meta$celltype)]
-        samples_in_celltype <- intersect(samples_in_celltype, names(sample_distances))
+        samples_in_sample_class <- rownames(meta)[meta$sample_class == ct & !is.na(meta$sample_class)]
+        samples_in_sample_class <- intersect(samples_in_sample_class, names(sample_distances))
         
-        if (length(samples_in_celltype) < 3) next  # Need at least 3 samples to detect outliers
+        if (length(samples_in_sample_class) < 3) next  # Need at least 3 samples to detect outliers
         
-        dists <- sample_distances[samples_in_celltype]
+        dists <- sample_distances[samples_in_sample_class]
         
         # Use 95th percentile or 2 MADs as threshold
         threshold <- max(quantile(dists, 0.95, na.rm = TRUE), 
                         median(dists, na.rm = TRUE) + 2 * mad(dists, na.rm = TRUE))
         
-        outliers_in_group <- samples_in_celltype[dists > threshold]
+        outliers_in_group <- samples_in_sample_class[dists > threshold]
         
         if (length(outliers_in_group) > 0) {
             outlier_samples <- c(outlier_samples, outliers_in_group)
             for (outlier in outliers_in_group) {
                 outlier_info[[outlier]] <- data.frame(
                     sample = outlier,
-                    celltype = ct,
+                    sample_class = ct,
                     distance_to_center = dists[outlier],
                     threshold = threshold,
                     stringsAsFactors = FALSE
@@ -522,28 +522,28 @@ if (!is.null(um)) {
     }
     
     if (length(outlier_samples) > 0) {
-        message("Potential outlier samples detected based on distance to celltype center:")
+        message("Potential outlier samples detected based on distance to sample_class center:")
         print(outlier_samples)
         
         # Find potential switch partners for each outlier
         switch_partners <- list()
         for (outlier in outlier_samples) {
-            outlier_celltype <- meta[outlier, "celltype"]
+            outlier_sample_class <- meta[outlier, "sample_class"]
             outlier_coords <- um[outlier, ]
             
-            # Find closest celltype center (excluding own celltype)
-            other_celltypes <- setdiff(rownames(celltype_centers), outlier_celltype)
-            if (length(other_celltypes) > 0) {
-                distances_to_centers <- apply(celltype_centers[other_celltypes, , drop = FALSE], 1, function(center) {
+            # Find closest sample_class center (excluding own sample_class)
+            other_sample_classs <- setdiff(rownames(sample_class_centers), outlier_sample_class)
+            if (length(other_sample_classs) > 0) {
+                distances_to_centers <- apply(sample_class_centers[other_sample_classs, , drop = FALSE], 1, function(center) {
                     sqrt(sum((outlier_coords - center)^2))
                 })
-                closest_celltype <- names(which.min(distances_to_centers))
+                closest_sample_class <- names(which.min(distances_to_centers))
                 
                 switch_partners[[outlier]] <- data.frame(
                     outlier = outlier,
-                    outlier_celltype = outlier_celltype,
+                    outlier_sample_class = outlier_sample_class,
                     distance_to_own_center = sample_distances[outlier],
-                    potential_switch_celltype = closest_celltype,
+                    potential_switch_sample_class = closest_sample_class,
                     distance_to_switch_center = min(distances_to_centers),
                     stringsAsFactors = FALSE
                 )
@@ -572,21 +572,21 @@ if (!is.null(um)) {
         # Additional plot: show distances to centers
         dist_df <- data.frame(
             sample = names(sample_distances),
-            celltype = meta[names(sample_distances), "celltype"],
+            sample_class = meta[names(sample_distances), "sample_class"],
             distance = sample_distances,
             is_outlier = names(sample_distances) %in% outlier_samples,
             stringsAsFactors = FALSE
         )
-        p_dist <- ggplot(dist_df, aes(x = celltype, y = distance, color = is_outlier)) +
+        p_dist <- ggplot(dist_df, aes(x = sample_class, y = distance, color = is_outlier)) +
             geom_jitter(width = 0.2, alpha = 0.7, size = 3) +
             scale_color_manual(values = c("FALSE" = "grey", "TRUE" = "red"), labels = c("Normal", "Outlier")) +
             theme_pca_min() +
-            labs(title = "Distance to Celltype Center (Median)", x = "Celltype", y = "UMAP Distance", color = "Status") +
+            labs(title = "Distance to sample_class Center (Median)", x = "sample_class", y = "UMAP Distance", color = "Status") +
             theme(axis.text.x = element_text(angle = 45, hjust = 1))
         save_plot("plots/umap", "umap_distance_to_centers.svg", p_dist)
         
     } else {
-        message("No outlier samples detected based on distance to celltype centers.")
+        message("No outlier samples detected based on distance to sample_class centers.")
     }
 }
 
@@ -613,7 +613,7 @@ for (k in best_k) {
   sil_tab[[length(sil_tab)+1]] <- data.frame(k=k, silhouette=sil_avg)
 
   if (requireNamespace("aricode", quietly = TRUE)) {
-    for (lab in c("celltype","ReplicateGroup")) {
+    for (lab in c("sample_class","ReplicateGroup")) {
       if (!lab %in% names(meta)) next
       ref <- factor(meta[[lab]])
       pred <- factor(km$cluster, levels = sort(unique(km$cluster)))
@@ -635,7 +635,7 @@ pc_grp_plot <- plot_and_save_group("kmeans_cluster", "PCA", "pca_by_kmeans_clust
 if (inherits(pc_grp_plot, "gg")) save_plot("plots/clustering", "pca_by_kmeans_cluster.svg", pc_grp_plot)
 
 # 8) Batch correction check: pre/post plate (or ReplicateGroup) using limma
-run_remove_batch <- function(mat_samples_by_feature, meta_df, batch_key = "plate", design_keys = c("celltype")) {
+run_remove_batch <- function(mat_samples_by_feature, meta_df, batch_key = "plate", design_keys = c("sample_class")) {
     if (!requireNamespace("limma", quietly = TRUE)) {
         message("limma not installed; skipping batch correction.")
         return(NULL)
@@ -659,7 +659,7 @@ run_remove_batch <- function(mat_samples_by_feature, meta_df, batch_key = "plate
     limma::removeBatchEffect(x, batch = batch, design = design)
 }
 
-mat_adj <- try(run_remove_batch(mat_samples_by_feature = mat, meta_df = meta, batch_key = "plate", design_keys = c("celltype")), silent = TRUE)
+mat_adj <- try(run_remove_batch(mat_samples_by_feature = mat, meta_df = meta, batch_key = "plate", design_keys = c("sample_class")), silent = TRUE)
 if (!inherits(mat_adj, "try-error") && !is.null(mat_adj)) {
     pca_prec <- pca
     pca_post <- prcomp(t(mat_adj), center = TRUE, scale. = TRUE)
@@ -683,11 +683,11 @@ plot_biplot_sparse <- function(topN = 20, out_file = "pca_biplot_sparse.svg"){
                   head(R[order(-R$PC2), "protein"], topN),
                   head(R[order(R$PC2),  "protein"], topN)))
   dd <- data.frame(pca$x[,1:2, drop=FALSE], meta[rownames(pca$x), , drop=FALSE])
-  pal <- make_modern_palette(nlevels(factor(dd$celltype)))
-  p <- ggplot(dd, aes(PC1, PC2, color=factor(celltype))) +
+  pal <- make_modern_palette(nlevels(factor(dd$sample_class)))
+  p <- ggplot(dd, aes(PC1, PC2, color=factor(sample_class))) +
     geom_point(size=3, alpha=0.8) +
     scale_color_manual(values = pal) +
-    theme_pca_min() + labs(title="PCA biplot (sparse loadings)", color="celltype")
+    theme_pca_min() + labs(title="PCA biplot (sparse loadings)", color="sample_class")
   arrows <- R[R$protein %in% sel, c("PC1","PC2","protein")]
   rngx <- diff(range(dd$PC1)); rngy <- diff(range(dd$PC2))
   scale_fac <- 0.5 * min(rngx, rngy)
@@ -745,7 +745,7 @@ add_pca_ellipses <- function(key, fname){
          color = key)
   save_plot("plots/ellipses", fname, p)
 }
-add_pca_ellipses("celltype", "pca_ellipses_celltype.svg")
+add_pca_ellipses("sample_class", "pca_ellipses_sample_class.svg")
 
 # B) Leave-one-batch/plate-out sensitivity (if plate exists)
 leave_one_batch_pca <- function(batch_key = "plate"){
@@ -788,14 +788,14 @@ leave_one_batch_pca <- function(batch_key = "plate"){
     subsamp <- rownames(pp$x)
     subsamp <- intersect(subsamp, rownames(meta))
     df_sc <- data.frame(pp$x[subsamp,1:2, drop=FALSE],
-                        celltype = droplevels(factor(meta[subsamp, "celltype"])),
+                        sample_class = droplevels(factor(meta[subsamp, "sample_class"])),
                         check.names = FALSE)
-    pal <- make_modern_palette(nlevels(droplevels(df_sc$celltype)))
-    p <- ggplot(df_sc, aes(PC1, PC2, color=celltype)) +
+    pal <- make_modern_palette(nlevels(droplevels(df_sc$sample_class)))
+    p <- ggplot(df_sc, aes(PC1, PC2, color=sample_class)) +
          geom_point(size=3, alpha=0.8) +
          scale_color_manual(values=pal, drop=FALSE, na.translate=FALSE) +
          theme_pca_min() + labs(title=sprintf("PCA (-%s)", b))
-    save_plot("plots/leave_one_batch", sprintf("pca_celltype_minus_%s.svg", b), p)
+    save_plot("plots/leave_one_batch", sprintf("pca_sample_class_minus_%s.svg", b), p)
   }
   if (length(res)) {
     tab <- do.call(rbind, res)
@@ -828,14 +828,14 @@ if (!is.null(pca_irlba)) {
   samp <- intersect(samp, rownames(meta))
   if (length(samp) >= 2) {
     df <- data.frame(pca_irlba$x[samp, 1:2, drop=FALSE],
-                     celltype = droplevels(factor(meta[samp, "celltype"])),
+                     sample_class = droplevels(factor(meta[samp, "sample_class"])),
                      check.names = FALSE)
-    pal <- make_modern_palette(nlevels(droplevels(df$celltype)))
-    p <- ggplot(df, aes(PC1, PC2, color = celltype)) +
+    pal <- make_modern_palette(nlevels(droplevels(df$sample_class)))
+    p <- ggplot(df, aes(PC1, PC2, color = sample_class)) +
       geom_point(size=3, alpha=0.8) +
       scale_color_manual(values=pal, drop=FALSE, na.translate=FALSE) +
-      theme_pca_min() + labs(title="IRLBA PCA by celltype", color="celltype")
-    save_plot("plots/irlba", "irlba_pca_by_celltype.svg", p)
+      theme_pca_min() + labs(title="IRLBA PCA by sample_class", color="sample_class")
+    save_plot("plots/irlba", "irlba_pca_by_sample_class.svg", p)
   } else {
     message("IRLBA: no overlapping samples to plot with metadata.")
   }
@@ -857,14 +857,14 @@ if (!is.null(pca_ro)) {
   samp <- rownames(pca_ro$x)
   samp <- intersect(samp, rownames(meta))
   df <- data.frame(pca_ro$x[samp,1:2, drop=FALSE],
-                   celltype = droplevels(factor(meta[samp, "celltype"])),
+                   sample_class = droplevels(factor(meta[samp, "sample_class"])),
                    check.names = FALSE)
-  pal <- make_modern_palette(nlevels(droplevels(df$celltype)))
-  p <- ggplot(df, aes(PC1, PC2, color = celltype)) +
+  pal <- make_modern_palette(nlevels(droplevels(df$sample_class)))
+  p <- ggplot(df, aes(PC1, PC2, color = sample_class)) +
        geom_point(size=3, alpha=0.8) +
        scale_color_manual(values=pal, drop=FALSE, na.translate=FALSE) +
-       theme_pca_min() + labs(title="ROBPCA by celltype", color="celltype")
-  save_plot("plots/robpca", "robpca_by_celltype.svg", p)
+       theme_pca_min() + labs(title="ROBPCA by sample_class", color="sample_class")
+  save_plot("plots/robpca", "robpca_by_sample_class.svg", p)
 }
 
 # D) t-SNE with parameter sweeps (on top PCs), aligned to meta and safe perplexity
@@ -891,7 +891,7 @@ run_tsne_and_plot <- function(){
         theme_pca_min() + labs(title = paste("t-SNE by", key, "(perp", p_ok, ")"), color = key)
       save_plot("plots/tsne", out, p)
     }
-    plot_tsne("celltype", sprintf("tsne_celltype_perp%d.svg", p_ok))
+    plot_tsne("sample_class", sprintf("tsne_sample_class_perp%d.svg", p_ok))
   }
 }
 run_tsne_and_plot()
@@ -923,104 +923,6 @@ if (exists("cors_df") && nrow(cors_df)) {
     save_plot("correlations", sprintf("protein_pc_%s_volcano.svg", pc), p)
   }
 }
-
-# G) Stratified PCA: by region and by layer (local plotting)
-#stratified_pca <- function(by = c("region","layer")){
-#  by <- match.arg(by)
-#  lv <- levels(droplevels(factor(meta[[by]])))
-#  for (l in lv) {
-#    samp <- rownames(meta)[meta[[by]] == l & !is.na(meta[[by]])]
-#    if (length(samp) < 4) next
-#    samp <- intersect(samp, colnames(mat))
-#    if (length(samp) < 4) next
-#    pp <- prcomp(t(mat[, samp, drop=FALSE]), center=TRUE, scale.=TRUE)
-#    # by ReplicateGroup
-#    df1 <- data.frame(pp$x[,1:2, drop=FALSE],
-#                      ReplicateGroup = droplevels(factor(meta[samp, "ReplicateGroup"])),
-#                      check.names = FALSE)
-#    palR <- make_modern_palette(nlevels(droplevels(df1$ReplicateGroup)))
-#    p1 <- ggplot(df1, aes(PC1, PC2, color = ReplicateGroup)) +
-#      geom_point(size=3, alpha=0.85) +
-#      scale_color_manual(values=palR, drop=FALSE, na.translate=FALSE) +
-#      theme_pca_min() + labs(title = sprintf("PCA (%s=%s) by Replicate", by, l))
-#    save_plot(file.path("plots/stratified", by), sprintf("pca_by_replicate_%s_%s.svg", by, l), p1)
-#    # by celltype
-#    df2 <- data.frame(pp$x[,1:2, drop=FALSE],
-#                      celltype = droplevels(factor(meta[samp, "celltype"])),
-#                      check.names = FALSE)
-#    palC <- make_modern_palette(nlevels(droplevels(df2$celltype)))
-#    p2 <- ggplot(df2, aes(PC1, PC2, color = celltype)) +
-#      geom_point(size=3, alpha=0.85) +
-#      scale_color_manual(values=palC, drop=FALSE, na.translate=FALSE) +
-#      theme_pca_min() + labs(title = sprintf("PCA (%s=%s) by celltype", by, l))
-#    save_plot(file.path("plots/stratified", by), sprintf("pca_by_celltype_%s_%s.svg", by, l), p2)
-#  }
-#}
-#stratified_pca("region")
-#stratified_pca("layer")
-
-# H) Contrast PCA: example contrast between two levels of a factor
-#contrast_pca <- function(factor_key = "layer", level_a = NULL, level_b = NULL, min_n = 3){
-#  if (!factor_key %in% names(meta)) return(invisible(NULL))
-#  fac <- droplevels(factor(meta[[factor_key]]))
-#  if (is.null(level_a) || is.null(level_b)) {
-#    if (nlevels(fac) < 2) return(invisible(NULL))
-#    levs <- levels(fac)[1:2]; level_a <- levs[1]; level_b <- levs[2]
-#  }
-#  A <- which(fac == level_a); B <- which(fac == level_b)
-#  if (length(A) < min_n || length(B) < min_n) return(invisible(NULL))
-#  M <- mat[, c(A, B), drop=FALSE]
-#  g <- c(rep(level_a, length(A)), rep(level_b, length(B)))
-#  Mz <- sweep(M, 1, rowMeans(M, na.rm=TRUE), "-")
-#  muA <- rowMeans(Mz[, g==level_a, drop=FALSE], na.rm=TRUE)
-#  muB <- rowMeans(Mz[, g==level_b, drop=FALSE], na.rm=TRUE)
-#  save_table("contrast", sprintf("contrast_%s_%s_vs_%s.csv", factor_key, level_a, level_b),
-#             data.frame(protein = rownames(M), muA = muA, muB = muB, diff = muA - muB, check.names = FALSE))
-#  pp <- prcomp(t(M), center=TRUE, scale.=TRUE)
-#  df <- data.frame(pp$x[,1:2, drop=FALSE], grp = droplevels(factor(g)), check.names = FALSE)
-#  pal <- make_modern_palette(nlevels(droplevels(df$grp)))
-#  p <- ggplot(df, aes(PC1, PC2, color = grp)) + geom_point(size=3, alpha=0.85) +
-#       scale_color_manual(values=pal, drop=FALSE, na.translate=FALSE) + theme_pca_min() +
-#       labs(title = sprintf("PCA (%s: %s vs %s)", factor_key, level_a, level_b), color = factor_key)
-#  save_plot("plots/contrast", sprintf("pca_%s_%s_vs_%s.svg", factor_key, level_a, level_b), p)
-#}
-#if ("layer" %in% names(meta) && nlevels(factor(meta$layer)) >= 2) {
-#  levs <- levels(droplevels(factor(meta$layer)))
-#  contrast_pca("layer", levs[1], levs[2])
-#}
-
-# I) Optional supervised projections (LDA, PLS-DA) – simple CV metrics
-#run_lda <- function(label_key = "region"){
-#  if (!label_key %in% names(meta)) return(NULL)
-#  if (!requireNamespace("MASS", quietly = TRUE)) { message("MASS not installed; skipping LDA."); return(NULL) }
-#  y <- factor(meta[[label_key]])
-#  X <- pca$x[, 1:min(10, ncol(pca$x)), drop=FALSE]
-#  keep <- !is.na(y) & rowSums(!is.finite(X)) == 0
-#  y <- droplevels(y[keep]); X <- X[keep, , drop=FALSE]
-#  if (nlevels(y) < 2) return(NULL)
-#  fit <- MASS::lda(X, grouping = y, CV = TRUE)
-#  acc <- mean(fit$class == y)
-#  save_table("supervised", sprintf("lda_%s_cv_accuracy.csv", label_key), data.frame(metric="CV-accuracy", value=acc))
-#}
-#run_lda("region")
-#run_lda("layer")
-
-#run_plsda <- function(label_key = "region"){
-#  if (!label_key %in% names(meta)) return(NULL)
-#  if (!requireNamespace("mixOmics", quietly = TRUE)) { message("mixOmics not installed; skipping PLS-DA."); return(NULL) }
-#  y <- factor(meta[[label_key]])
-#  X <- t(mat)
-#  keep <- !is.na(y) & rowSums(!is.finite(X)) == 0
-#  y <- droplevels(y[keep]); X <- X[keep, , drop=FALSE]
-#  if (nlevels(y) < 2) return(NULL)
-#  set.seed(42)
-#  fit <- mixOmics::plsda(X, y, ncomp = min(3, nlevels(y)-1))
-#  perf <- mixOmics::perf(fit, validation="Mfold", folds=5, nrepeat=5, progressBar=FALSE)
-#  acc <- mean(perf$error.rate$overall)
-#  save_table("supervised", sprintf("plsda_%s_cv_accuracy.csv", label_key), data.frame(metric="Mfold-accuracy", value=acc))
-#}
-#run_plsda("region")
-#run_plsda("layer")
 
 # J) WGCNA module eigengene vs PCs (explicit WGCNA::cor, aligned samples)
 #wgcna_modules_vs_pcs <- function(){
@@ -1059,7 +961,7 @@ pc_contribution_heatmap <- function(n_pcs = 10) {
     }
     
     # Annotate samples with metadata
-    ann_cols <- intersect(c("celltype", "ExpGroup", "ReplicateGroup", "plate"), names(meta))
+    ann_cols <- intersect(c("sample_class", "condition_code", "ReplicateGroup", "plate"), names(meta))
     if (length(ann_cols) > 0) {
         annotation_row <- meta[rownames(pca$x), ann_cols, drop = FALSE]
         if ("sampleNumber" %in% names(meta)) {
@@ -1079,11 +981,11 @@ pc_pairs_plot <- function(n_pcs = 5) {
         return(NULL)
     }
     pc_subset <- pca$x[, 1:min(n_pcs, ncol(pca$x)), drop = FALSE]
-    df <- data.frame(pc_subset, celltype = meta[rownames(pc_subset), "celltype"])
-    pal <- make_modern_palette(nlevels(droplevels(factor(df$celltype))))
+    df <- data.frame(pc_subset, sample_class = meta[rownames(pc_subset), "sample_class"])
+    pal <- make_modern_palette(nlevels(droplevels(factor(df$sample_class))))
     
     p <- GGally::ggpairs(df, columns = 1:ncol(pc_subset), 
-                        aes(color = celltype, alpha = 0.6),
+                        aes(color = sample_class, alpha = 0.6),
                         upper = list(continuous = "cor"),
                         lower = list(continuous = "points")) +
         scale_color_manual(values = pal) +
@@ -1124,7 +1026,7 @@ sample_distance_heatmap <- function(n_pcs = 10) {
     pc_mat <- pca$x[, 1:min(n_pcs, ncol(pca$x)), drop = FALSE]
     dist_mat <- as.matrix(dist(pc_mat, method = "euclidean"))
     
-    ann_cols <- intersect(c("celltype", "ExpGroup", "plate"), names(meta))
+    ann_cols <- intersect(c("sample_class", "condition_code", "plate"), names(meta))
     if (length(ann_cols) > 0) {
         annotation_col <- meta[colnames(dist_mat), ann_cols, drop = FALSE]
         annotation_row <- annotation_col
@@ -1179,12 +1081,12 @@ pc_trajectory_plot <- function() {
     
     df <- data.frame(pca$x[, 1:2], 
                      sampleNumber = meta[rownames(pca$x), "sampleNumber"],
-                     celltype = meta[rownames(pca$x), "celltype"])
+                     sample_class = meta[rownames(pca$x), "sample_class"])
     df <- df[order(df$sampleNumber), ]
     
-    pal <- make_modern_palette(nlevels(droplevels(factor(df$celltype))))
+    pal <- make_modern_palette(nlevels(droplevels(factor(df$sample_class))))
     
-    p <- ggplot(df, aes(PC1, PC2, color = celltype)) +
+    p <- ggplot(df, aes(PC1, PC2, color = sample_class)) +
         geom_path(color = "gray70", alpha = 0.5, size = 0.5) +
         geom_point(size = 4, alpha = 0.8) +
         scale_color_manual(values = pal) +
@@ -1246,16 +1148,16 @@ compare_normalizations <- function() {
         
         df <- data.frame(
             item$pca$x[common_samples, 1:2, drop = FALSE],
-            celltype = meta[common_samples, "celltype"]
+            sample_class = meta[common_samples, "sample_class"]
         )
         
-        pal <- make_modern_palette(nlevels(droplevels(factor(df$celltype))))
+        pal <- make_modern_palette(nlevels(droplevels(factor(df$sample_class))))
         
-        p <- ggplot(df, aes(PC1, PC2, color = celltype)) +
+        p <- ggplot(df, aes(PC1, PC2, color = sample_class)) +
             geom_point(size = 4, alpha = 0.8, stroke = 0) +
             scale_color_manual(values = pal) +
             theme_pca_min() +
-            labs(title = paste("PCA:", item$title), color = "celltype")
+            labs(title = paste("PCA:", item$title), color = "sample_class")
         
         save_plot("plots/normalization", item$file, p)
     }
@@ -1303,13 +1205,13 @@ pca_3d_plot <- function() {
     }
     
     df <- data.frame(pca$x[, 1:3],
-                     celltype = meta[rownames(pca$x), "celltype"],
+                     sample_class = meta[rownames(pca$x), "sample_class"],
                      sample = rownames(pca$x))
     
-    pal <- make_modern_palette(nlevels(droplevels(factor(df$celltype))))
+    pal <- make_modern_palette(nlevels(droplevels(factor(df$sample_class))))
     
     p <- plotly::plot_ly(df, x = ~PC1, y = ~PC2, z = ~PC3, 
-                        color = ~celltype, colors = pal,
+                        color = ~sample_class, colors = pal,
                         text = ~sample, type = "scatter3d", mode = "markers",
                         marker = list(size = 5, opacity = 0.8)) %>%
         plotly::layout(title = "3D PCA Plot (PC1-PC3)",
@@ -1329,19 +1231,19 @@ pc_density_plots <- function(n_pcs = 3) {
         pc_name <- paste0("PC", i)
         df <- data.frame(
             score = pca$x[, i],
-            celltype = meta[rownames(pca$x), "celltype"]
+            sample_class = meta[rownames(pca$x), "sample_class"]
         )
         
-        pal <- make_modern_palette(nlevels(droplevels(factor(df$celltype))))
+        pal <- make_modern_palette(nlevels(droplevels(factor(df$sample_class))))
         
-        p <- ggplot(df, aes(x = score, fill = celltype)) +
+        p <- ggplot(df, aes(x = score, fill = sample_class)) +
             geom_density(alpha = 0.6) +
             scale_fill_manual(values = pal) +
             theme_pca_min() +
-            labs(title = paste(pc_name, "Distribution by Celltype"),
+            labs(title = paste(pc_name, "Distribution by sample_class"),
                  x = paste(pc_name, "Score"), y = "Density")
         
-        save_plot("plots/density", paste0(pc_name, "_density_by_celltype.svg"), p)
+        save_plot("plots/density", paste0(pc_name, "_density_by_sample_class.svg"), p)
     }
 }
 pc_density_plots(3)
@@ -1351,7 +1253,7 @@ message("All supplementary plots completed!")
 # ================== Additional Main & Supplementary Figure Plots ==================
 
 # U) Boxplots of PC scores by experimental groups
-pc_boxplots_by_group <- function(n_pcs = 5, group_key = "ExpGroup") {
+pc_boxplots_by_group <- function(n_pcs = 5, group_key = "condition_code") {
     if (!group_key %in% names(meta)) {
         message(paste(group_key, "not in metadata; skipping PC boxplots"))
         return(NULL)
@@ -1379,11 +1281,11 @@ pc_boxplots_by_group <- function(n_pcs = 5, group_key = "ExpGroup") {
         save_plot("plots/boxplots", paste0(pc_name, "_boxplot_by_", group_key, ".svg"), p)
     }
 }
-pc_boxplots_by_group(5, "ExpGroup")
-pc_boxplots_by_group(5, "celltype")
+pc_boxplots_by_group(5, "condition_code")
+pc_boxplots_by_group(5, "sample_class")
 
 # V) Violin plots with overlaid points and statistical tests
-pc_violin_plots <- function(n_pcs = 5, group_key = "celltype") {
+pc_violin_plots <- function(n_pcs = 5, group_key = "sample_class") {
     if (!group_key %in% names(meta)) return(NULL)
     
     all_normality <- list()
@@ -1533,7 +1435,7 @@ pc_violin_plots <- function(n_pcs = 5, group_key = "celltype") {
         max_y <- y_start;
         if (n_sig_comparisons > 0) {
             posthoc_df$group1 <- sapply(strsplit(posthoc_df$Comparison, " vs "), `[`, 1);
-            posthoc_df$group2 <- sapply(strsplit(posthoc_df$Comparison, " vs "), `[`, 2);
+            posthoc_df$replicate_unit <- sapply(strsplit(posthoc_df$Comparison, " vs "), `[`, 2);
             
             sig_comparisons <- posthoc_df[posthoc_df$P_Value < 0.05, ];
             
@@ -1545,7 +1447,7 @@ pc_violin_plots <- function(n_pcs = 5, group_key = "celltype") {
                 sig_symbol <- if (p_val < 0.001) "***" else if (p_val < 0.01) "**" else if (p_val < 0.05) "*" else "ns";
                 
                 x1 <- which(levels(df$group) == sig_comparisons$group1[idx]);
-                x2 <- which(levels(df$group) == sig_comparisons$group2[idx]);
+                x2 <- which(levels(df$group) == sig_comparisons$replicate_unit[idx]);
                 
                 p <- p + 
                     annotate("segment", x = x1, xend = x2, y = y_pos, yend = y_pos, color = "black", size = 0.5) +
@@ -1585,8 +1487,8 @@ pc_violin_plots <- function(n_pcs = 5, group_key = "celltype") {
         save_table("tables/statistics", paste0("summary_normality_tests_", group_key, ".csv"), combined_normality);
     }
 }
-pc_violin_plots(5, "celltype")
-pc_violin_plots(5, "ExpGroup")
+pc_violin_plots(5, "sample_class")
+pc_violin_plots(5, "condition_code")
 
 # W) Loading contribution per PC (top positive and negative)
 loading_contribution_bars <- function(n_pcs = 5, top_n = 10) {
@@ -1692,7 +1594,7 @@ sample_qc_vs_pcs <- function(n_pcs = 2) {
 sample_qc_vs_pcs(3)
 
 # Z) Hierarchical clustering dendrogram colored by metadata
-sample_dendrogram <- function(n_pcs = 10, group_key = "celltype") {
+sample_dendrogram <- function(n_pcs = 10, group_key = "sample_class") {
     if (!group_key %in% names(meta)) return(NULL)
     
     pc_mat <- pca$x[, 1:min(n_pcs, ncol(pca$x)), drop = FALSE]
@@ -1710,7 +1612,7 @@ sample_dendrogram <- function(n_pcs = 10, group_key = "celltype") {
     rect.hclust(hc, k = nlevels(droplevels(groups)), border = pal)
     dev.off()
 }
-sample_dendrogram(10, "celltype")
+sample_dendrogram(10, "sample_class")
 
 # AA) Scree plot with Kaiser criterion line (eigenvalue = 1)
 scree_with_kaiser <- function() {
@@ -1737,7 +1639,7 @@ scree_with_kaiser <- function() {
 scree_with_kaiser()
 
 # AB) PC time series (if temporal/sequential metadata available)
-pc_timeseries <- function(time_key = "sampleNumber", group_key = "celltype") {
+pc_timeseries <- function(time_key = "sampleNumber", group_key = "sample_class") {
     if (!time_key %in% names(meta) || !group_key %in% names(meta)) {
         message("Required metadata not available for time series")
         return(NULL)
@@ -1763,7 +1665,7 @@ pc_timeseries <- function(time_key = "sampleNumber", group_key = "celltype") {
     
     save_plot("plots/timeseries", "pc1_timeseries.svg", p)
 }
-pc_timeseries("sampleNumber", "celltype")
+pc_timeseries("sampleNumber", "sample_class")
 
 # AC) Batch effect visualization before/after correction
 batch_effect_comparison <- function() {
@@ -1787,10 +1689,10 @@ message("All additional supplementary and main figure plots completed!")
 
 # ================== Additional Main Figure Plots ==================
 
-# AD) Side-by-side PCA plots for different groupings (publication quality)
+# AD) Side-by-side PCA plots for different groupings (report quality)
 combined_pca_panels <- function() {
     # Create 2x2 panel of key groupings
-    groupings <- c("celltype", "ExpGroup", "ReplicateGroup", "plate")
+    groupings <- c("sample_class", "condition_code", "ReplicateGroup", "plate")
     groupings <- intersect(groupings, names(meta))
     
     if (length(groupings) < 2) {
@@ -1830,7 +1732,7 @@ combined_pca_panels <- function() {
 }
 combined_pca_panels()
 
-# AE) Publication-ready variance explained with cumulative overlay
+# AE) Report-ready variance explained with cumulative overlay
 variance_main_figure <- function() {
     var_exp <- (pca$sdev^2) / sum(pca$sdev^2)
     cum_var <- cumsum(var_exp)
@@ -1917,13 +1819,13 @@ top_proteins_heatmap_main <- function(n_pcs = 3, top_per_pc = 15) {
     
     # Annotation
     ann_col <- data.frame(
-        celltype = meta[colnames(expr_subset), "celltype"],
+        sample_class = meta[colnames(expr_subset), "sample_class"],
         row.names = colnames(expr_subset)
     )
     
     ann_colors <- list(
-        celltype = setNames(make_modern_palette(nlevels(factor(ann_col$celltype))),
-                           levels(factor(ann_col$celltype)))
+        sample_class = setNames(make_modern_palette(nlevels(factor(ann_col$sample_class))),
+                           levels(factor(ann_col$sample_class)))
     )
     
     pheatmap::pheatmap(
@@ -1943,7 +1845,7 @@ top_proteins_heatmap_main <- function(n_pcs = 3, top_per_pc = 15) {
 top_proteins_heatmap_main(3, 15)
 
 # AG) PCA with confidence ellipses (main figure version)
-pca_with_ellipses_main <- function(group_key = "celltype", conf_level = 0.95) {
+pca_with_ellipses_main <- function(group_key = "sample_class", conf_level = 0.95) {
     if (!group_key %in% names(meta)) return(NULL)
     
     grp <- build_group(group_key)
@@ -1981,8 +1883,8 @@ pca_with_ellipses_main <- function(group_key = "celltype", conf_level = 0.95) {
     
     save_plot("plots/main_figure", paste0("pca_ellipses_", group_key, "_main.svg"), p, width = 10, height = 8)
 }
-pca_with_ellipses_main("celltype", 0.95)
-pca_with_ellipses_main("ExpGroup", 0.95)
+pca_with_ellipses_main("sample_class", 0.95)
+pca_with_ellipses_main("condition_code", 0.95)
 
 # AH) Loading plot for top contributing proteins (main figure)
 loadings_main_figure <- function(pc_x = 1, pc_y = 2, top_n = 25) {
@@ -2020,7 +1922,7 @@ loadings_main_figure <- function(pc_x = 1, pc_y = 2, top_n = 25) {
 loadings_main_figure(1, 2, 25)
 
 # AI) Statistical summary barplot (ANOVA/Kruskal results)
-statistical_summary_barplot <- function(group_key = "celltype") {
+statistical_summary_barplot <- function(group_key = "sample_class") {
     if (!group_key %in% names(meta)) return(NULL)
     
     # Run tests for multiple PCs
@@ -2085,11 +1987,11 @@ statistical_summary_barplot <- function(group_key = "celltype") {
               paste0("pc_group_associations_", group_key, ".csv"), 
               results_df)
 }
-statistical_summary_barplot("celltype")
-statistical_summary_barplot("ExpGroup")
+statistical_summary_barplot("sample_class")
+statistical_summary_barplot("condition_code")
 
 # AI-UMAP) Statistical summary barplot for UMAP dimensions
-statistical_summary_barplot_umap <- function(group_key = "celltype") {
+statistical_summary_barplot_umap <- function(group_key = "sample_class") {
     if (!group_key %in% names(meta)) return(NULL)
     if (is.null(um)) {
         message("UMAP not available; skipping UMAP statistical summary")
@@ -2167,11 +2069,11 @@ statistical_summary_barplot_umap <- function(group_key = "celltype") {
     
     message(paste("Completed UMAP statistical summary for", n_dims, "dimensions by", group_key))
 }
-statistical_summary_barplot_umap("celltype")
-statistical_summary_barplot_umap("ExpGroup")
+statistical_summary_barplot_umap("sample_class")
+statistical_summary_barplot_umap("condition_code")
 
 # AJ) Sample distribution along PC1 (density + rug plot)
-pc1_distribution_main <- function(group_key = "celltype") {
+pc1_distribution_main <- function(group_key = "sample_class") {
     if (!group_key %in% names(meta)) return(NULL)
     
     df <- data.frame(
@@ -2198,10 +2100,10 @@ pc1_distribution_main <- function(group_key = "celltype") {
     save_plot("plots/main_figure", paste0("pc1_distribution_", group_key, ".svg"), 
              p, width = 10, height = 6)
 }
-pc1_distribution_main("celltype")
+pc1_distribution_main("sample_class")
 
 # AK) Multi-panel: PC1 vs PC2, PC2 vs PC3, PC1 vs PC3
-multipanel_pca_combinations <- function(group_key = "celltype") {
+multipanel_pca_combinations <- function(group_key = "sample_class") {
     if (!group_key %in% names(meta)) return(NULL)
     
     grp <- build_group(group_key)
@@ -2250,7 +2152,7 @@ multipanel_pca_combinations <- function(group_key = "celltype") {
         }
     }
 }
-multipanel_pca_combinations("celltype")
+multipanel_pca_combinations("sample_class")
 
 message("All main figure plots completed!")
 
@@ -2258,7 +2160,7 @@ message("All main figure plots completed!")
 # ================== Innovative Main Figure Visualizations ==================
 
 # AL) Arc diagram showing sample relationships based on PC distance
-pc_arc_diagram <- function(group_key = "celltype", n_connections = 50) {
+pc_arc_diagram <- function(group_key = "sample_class", n_connections = 50) {
     if (!requireNamespace("ggraph", quietly = TRUE) || !requireNamespace("igraph", quietly = TRUE)) {
         message("ggraph/igraph not available; skipping arc diagram")
         return(NULL)
@@ -2290,10 +2192,10 @@ pc_arc_diagram <- function(group_key = "celltype", n_connections = 50) {
     
     save_plot("plots/innovative", "pc_arc_diagram.svg", p, width = 14, height = 6)
 }
-pc_arc_diagram("celltype", 50)
+pc_arc_diagram("sample_class", 50)
 
 # AM) Radial/polar PCA plot
-radial_pca_plot <- function(group_key = "celltype") {
+radial_pca_plot <- function(group_key = "sample_class") {
     df <- data.frame(
         PC1 = pca$x[, 1],
         PC2 = pca$x[, 2],
@@ -2321,10 +2223,10 @@ radial_pca_plot <- function(group_key = "celltype") {
     
     save_plot("plots/innovative", "radial_pca.svg", p, width = 8, height = 8)
 }
-radial_pca_plot("celltype")
+radial_pca_plot("sample_class")
 
 # AN) Alluvial/Sankey diagram showing sample flow across PCA space
-alluvial_pca_flow <- function(group_key = "celltype") {
+alluvial_pca_flow <- function(group_key = "sample_class") {
     if (!requireNamespace("ggalluvial", quietly = TRUE)) {
         message("ggalluvial not available; skipping alluvial plot")
         return(NULL)
@@ -2358,10 +2260,10 @@ alluvial_pca_flow <- function(group_key = "celltype") {
     
     save_plot("plots/innovative", "alluvial_pca_flow.svg", p, width = 10, height = 6)
 }
-alluvial_pca_flow("celltype")
+alluvial_pca_flow("sample_class")
 
 # AO) Ridgeline plot showing PC score distributions across groups
-ridgeline_pc_distributions <- function(n_pcs = 3, group_key = "celltype") {
+ridgeline_pc_distributions <- function(n_pcs = 3, group_key = "sample_class") {
     if (!requireNamespace("ggridges", quietly = TRUE)) {
         message("ggridges not available; skipping ridgeline plot")
         return(NULL)
@@ -2392,10 +2294,10 @@ ridgeline_pc_distributions <- function(n_pcs = 3, group_key = "celltype") {
     
     save_plot("plots/innovative", "ridgeline_pc_distributions.svg", p, width = 10, height = 6)
 }
-ridgeline_pc_distributions(3, "celltype")
+ridgeline_pc_distributions(3, "sample_class")
 
 # AP) Hexbin density plot with marginal distributions
-hexbin_pca_with_marginals <- function(group_key = "celltype") {
+hexbin_pca_with_marginals <- function(group_key = "sample_class") {
     if (!requireNamespace("ggExtra", quietly = TRUE)) {
         message("ggExtra not available; skipping marginal plot")
         return(NULL)
@@ -2421,7 +2323,7 @@ hexbin_pca_with_marginals <- function(group_key = "celltype") {
     ggsave(file.path(ensure_dir(subdir("plots/innovative")), "pca_marginal_densities.png"),
            p_marg, width = 10, height = 8, dpi = 300)
 }
-hexbin_pca_with_marginals("celltype")
+hexbin_pca_with_marginals("sample_class")
 
 # AQ) Network graph of PC loadings (protein-protein similarity)
 loading_network_graph <- function(pc_x = 1, pc_y = 2, top_n = 50, cor_threshold = 0.7) {
@@ -2480,7 +2382,7 @@ loading_network_graph <- function(pc_x = 1, pc_y = 2, top_n = 50, cor_threshold 
 loading_network_graph(1, 2, 50, 0.7)
 
 # AR) Parallel coordinates plot for top PCs
-parallel_coordinates_pcs <- function(n_pcs = 5, group_key = "celltype") {
+parallel_coordinates_pcs <- function(n_pcs = 5, group_key = "sample_class") {
     if (!requireNamespace("GGally", quietly = TRUE)) {
         message("GGally not available; skipping parallel coordinates")
         return(NULL)
@@ -2504,7 +2406,7 @@ parallel_coordinates_pcs <- function(n_pcs = 5, group_key = "celltype") {
     
     save_plot("plots/innovative", "parallel_coordinates_pcs.svg", p, width = 10, height = 6)
 }
-parallel_coordinates_pcs(5, "celltype")
+parallel_coordinates_pcs(5, "sample_class")
 
 # AS) Sunburst/treemap of variance contribution
 variance_sunburst <- function() {
@@ -2534,7 +2436,7 @@ variance_sunburst <- function() {
 variance_sunburst()
 
 # AT) Contour plot showing density in PC space
-contour_density_pca <- function(group_key = "celltype") {
+contour_density_pca <- function(group_key = "sample_class") {
     df <- data.frame(
         PC1 = pca$x[, 1],
         PC2 = pca$x[, 2],
@@ -2553,10 +2455,10 @@ contour_density_pca <- function(group_key = "celltype") {
     
     save_plot("plots/innovative", "contour_density_pca.svg", p, width = 10, height = 8)
 }
-contour_density_pca("celltype")
+contour_density_pca("sample_class")
 
 # AU) Chord diagram for group relationships based on PC overlap
-chord_diagram_groups <- function(group_key = "celltype", pc_threshold = 2) {
+chord_diagram_groups <- function(group_key = "sample_class", pc_threshold = 2) {
     if (!requireNamespace("circlize", quietly = TRUE)) {
         message("circlize not available; skipping chord diagram")
         return(NULL)
@@ -2590,10 +2492,10 @@ chord_diagram_groups <- function(group_key = "celltype", pc_threshold = 2) {
     dev.off()
     circlize::circos.clear()
 }
-chord_diagram_groups("celltype")
+chord_diagram_groups("sample_class")
 
 # AV) Small multiples: individual sample trajectories
-sample_trajectory_multiples <- function(n_samples = 16, group_key = "celltype") {
+sample_trajectory_multiples <- function(n_samples = 16, group_key = "sample_class") {
     # Plot all samples, faceted by group
     groups <- factor(meta[rownames(pca$x), group_key])
     
@@ -2618,12 +2520,12 @@ sample_trajectory_multiples <- function(n_samples = 16, group_key = "celltype") 
     
     save_plot("plots/innovative", "sample_multiples.svg", p, width = 12, height = 10)
 }
-sample_trajectory_multiples(16, "celltype")
+sample_trajectory_multiples(16, "sample_class")
 
 message("All innovative visualizations completed!")
 
 # hexbin_umap_with_marginals - UMAP version with marginal distributions
-hexbin_umap_with_marginals <- function(group_key = "celltype") {
+hexbin_umap_with_marginals <- function(group_key = "sample_class") {
     if (is.null(um)) {
         message("UMAP not available; skipping UMAP marginal plot")
         return(NULL)
@@ -2661,7 +2563,11 @@ hexbin_umap_with_marginals <- function(group_key = "celltype") {
                      paste0("umap_marginal_densities_by_", group_key, ".svg")),
            p_marg, width = 10, height = 8, dpi = 300)
 }
-hexbin_umap_with_marginals("celltype")
-hexbin_umap_with_marginals("ExpGroup")
+hexbin_umap_with_marginals("sample_class")
+hexbin_umap_with_marginals("condition_code")
 hexbin_umap_with_marginals("ReplicateGroup")
+
+
+
+
 

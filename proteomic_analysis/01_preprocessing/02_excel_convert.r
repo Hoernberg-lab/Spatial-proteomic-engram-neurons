@@ -2,6 +2,7 @@ library(readxl)
 library(dplyr)
 library(writexl)
 library(tools)
+source(file.path("R", "analysis_labels.R"))
 
 # ---- CONFIGURATION ----
 # Set mode: "excel" for sheets in one Excel file, "folder" for all Excel files in a folder
@@ -15,6 +16,14 @@ output_dir <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Datas
 
 # Read metadata
 metadata <- read_excel(metadata_path)
+if (!"sample_class" %in% names(metadata)) {
+    metadata$sample_class <- parse_sample_class(metadata$sample_id)
+}
+if (!"condition_code" %in% names(metadata)) {
+    source_condition <- if ("condition" %in% names(metadata)) metadata$condition else metadata$sample_id
+    metadata$condition_code <- parse_condition_code(source_condition)
+}
+metadata$condition <- normalize_condition(metadata$condition_code)
 
 # ---- READ DATA FILES ----
 sheet_dfs <- list()
@@ -70,18 +79,17 @@ new_dfs <- lapply(sheet_dfs, function(df) {
         }
         row
     })
-    # ---- Add combined row: region_layer_ExpGroup ----
+    # ---- Add combined row: sample_class_condition ----
     combined_row <- rep(NA, ncol(df))
     names(combined_row) <- colnames(df)
-    combined_row["id"] <- "region_layer_ExpGroup"
-    if (all(c("region", "layer", "ExpGroup") %in% colnames(metadata))) {
+    combined_row["id"] <- "sample_class_condition"
+    if (all(c("sample_class", "condition") %in% colnames(metadata))) {
         idxs <- match(sample_cols, metadata$sample_id)
         valid <- !is.na(idxs) & idxs >= 1 & idxs <= nrow(metadata)
         if (any(valid)) {
-            region <- as.character(metadata$region[idxs[valid]])
-            layer <- as.character(metadata$layer[idxs[valid]])
-            expgroup <- as.character(metadata$ExpGroup[idxs[valid]])
-            combined <- paste(region, layer, expgroup, sep = "_")
+            sample_class <- as.character(metadata$sample_class[idxs[valid]])
+            condition <- as.character(metadata$condition[idxs[valid]])
+            combined <- paste(sample_class, condition, sep = "_")
             combined_row[sample_cols[valid]] <- combined
         }
     }
@@ -89,41 +97,24 @@ new_dfs <- lapply(sheet_dfs, function(df) {
     meta_df <- rbind(meta_df, as.data.frame(t(combined_row), stringsAsFactors = FALSE))
     # Combine metadata rows and original data
     final_df <- rbind(meta_df, df)
-    # ---- Replace NA in layer and celltype_layer rows with "microglia" ----
-    layer_idx <- which(final_df$id == "layer")
-    celltype_layer_idx <- which(final_df$id == "celltype_layer")
-    if (length(layer_idx) == 1) {
-        final_df[layer_idx, sample_cols] <- as.character(final_df[layer_idx, sample_cols])
-        na_idx <- which(is.na(final_df[layer_idx, sample_cols]) | final_df[layer_idx, sample_cols] == "NA")
-        if (length(na_idx) > 0) {
-            final_df[layer_idx, sample_cols[na_idx]] <- "microglia"
-        }
-    }
-    if (length(celltype_layer_idx) == 1) {
-        final_df[celltype_layer_idx, sample_cols] <- as.character(final_df[celltype_layer_idx, sample_cols])
-        na_idx <- which(is.na(final_df[celltype_layer_idx, sample_cols]) | final_df[celltype_layer_idx, sample_cols] == "NA")
-        if (length(na_idx) > 0) {
-            final_df[celltype_layer_idx, sample_cols[na_idx]] <- "microglia"
-        }
-    }
     # ---- Add phenotypeWithinUnit row after NA replacement ----
     phenotype_row <- rep(NA, ncol(final_df))
     names(phenotype_row) <- colnames(final_df)
     phenotype_row["id"] <- "phenotypeWithinUnit"
     # Use combined_row values for phenotypeWithinUnit
-    if (all(c("region", "layer", "ExpGroup") %in% colnames(metadata))) {
+    if (all(c("sample_class", "condition") %in% colnames(metadata))) {
         idxs <- match(sample_cols, metadata$sample_id)
         valid <- !is.na(idxs) & idxs >= 1 & idxs <= nrow(metadata)
         if (any(valid)) {
-            region <- as.character(metadata$region[idxs[valid]])
-            layer <- as.character(final_df[layer_idx, sample_cols[valid]])
-            expgroup <- as.character(metadata$ExpGroup[idxs[valid]])
-            combined <- paste(region, layer, expgroup, sep = "_")
+            sample_class <- as.character(metadata$sample_class[idxs[valid]])
+            condition <- as.character(metadata$condition[idxs[valid]])
+            combined <- paste(sample_class, condition, sep = "_")
             phenotype_row[sample_cols[valid]] <- combined
         }
     }
-    # Insert phenotypeWithinUnit row after layer and celltype_layer rows
-    insert_idx <- max(layer_idx, celltype_layer_idx, na.rm = TRUE)
+    # Insert phenotypeWithinUnit row after sample_class and condition rows
+    insert_candidates <- which(final_df$id %in% c("sample_class", "condition", "condition_code"))
+    insert_idx <- if (length(insert_candidates) > 0) max(insert_candidates) else nrow(meta_df)
     final_df <- rbind(
         final_df[seq_len(insert_idx), , drop = FALSE],
         as.data.frame(t(phenotype_row), stringsAsFactors = FALSE),
@@ -150,7 +141,7 @@ for (sheet in names(new_dfs)) {
 
 # ---- SAVE EACH DATA FRAME AS GCT v1.3 ----
 write_gct_v1.3 <- function(df, file, metadata) {
-    meta_row_idx <- which(df$id %in% c(names(metadata), "region_layer_ExpGroup", "phenotypeWithinUnit"))
+    meta_row_idx <- which(df$id %in% c(names(metadata), "sample_class_condition", "phenotypeWithinUnit"))
     data_rows <- df[-meta_row_idx, , drop = FALSE]
     data_rows <- data_rows[!is.na(data_rows$id) & data_rows$id != "", , drop = FALSE]
     sample_cols <- setdiff(colnames(df), "id")

@@ -14,12 +14,13 @@ required_pkgs <- c("dplyr", "readr", "stringr", "purrr", "fs", "tibble")
 if (!requireNamespace("pacman", quietly = TRUE)) install.packages("pacman")
 library(pacman)
 pacman::p_load(char = required_pkgs)
+source(file.path("R", "analysis_labels.R"))
 
 # -------------------------------
 # Parameters
 # -------------------------------
 
-use_label_map <- FALSE   # TRUE = con/res/sus mapping
+labels <- source_analysis_labels()
 
 # -------------------------------
 # Input
@@ -44,20 +45,26 @@ safe_name <- function(x) {
     stringr::str_replace_all("_+", "_")
 }
 
-swap_comparison <- function(comp_key, use_label_map = FALSE) {
+format_side <- function(unit, sample_class, condition_code) {
+  condition <- labels$condition_code_map[[condition_code]]
+  if (is.null(condition) || is.na(condition)) condition <- condition_code
+  paste(unit, sample_class, condition, sep = "_")
+}
+
+format_comparison <- function(case_unit, case_class, case_code, ref_unit, ref_class, ref_code) {
+  paste0(
+    format_side(case_unit, case_class, case_code),
+    "_vs_",
+    format_side(ref_unit, ref_class, ref_code)
+  )
+}
+
+swap_comparison <- function(comp_key) {
   parts <- stringr::str_split(comp_key, "\\.over\\.", simplify = TRUE)
 
   if (ncol(parts) != 2) return(NA_character_)
 
-  rev <- paste0(parts[2], ".over.", parts[1])
-
-  if (use_label_map) {
-    rev <- stringr::str_replace_all(rev, "_1", "con")
-    rev <- stringr::str_replace_all(rev, "_2", "res")
-    rev <- stringr::str_replace_all(rev, "_3", "sus")
-  }
-
-  rev
+  paste0(parts[2], ".over.", parts[1])
 }
 
 split_col <- function(col) {
@@ -79,10 +86,8 @@ split_col <- function(col) {
 parse_compkey <- function(key) {
   m <- stringr::str_match(
     key,
-    "^([A-Za-z0-9]+)_([a-z]+)_([123])\\.over\\.([A-Za-z0-9]+)_([a-z]+)_([123])$"
+    "^([A-Za-z0-9]+)_([a-z]+)_([1234])\\.over\\.([A-Za-z0-9]+)_([a-z]+)_([1234])$"
   )
-
-  label_map <- c("1" = "con", "2" = "res", "3" = "sus")
 
   if (!is.na(m[1, 1])) {
     r1 <- m[1, 2]
@@ -93,16 +98,13 @@ parse_compkey <- function(key) {
     g2 <- m[1, 6]
     l2 <- m[1, 7]
 
-    left  <- paste0(r1, g1, label_map[[l1]])
-    right <- paste0(r2, g2, label_map[[l2]])
-
-    return(paste0(left, "_", right))
+    return(format_comparison(r1, g1, l1, r2, g2, l2))
   }
 
   key2 <- stringr::str_replace_all(key, "\\.over\\.", "_")
-  key2 <- stringr::str_replace_all(key2, "_1", "con")
-  key2 <- stringr::str_replace_all(key2, "_2", "res")
-  key2 <- stringr::str_replace_all(key2, "_3", "sus")
+  for (code in names(labels$condition_code_map)) {
+    key2 <- stringr::str_replace_all(key2, paste0("_", code, "(?=($|_))"), paste0("_", labels$condition_code_map[[code]]))
+  }
   key2 <- stringr::str_replace_all(key2, "[^A-Za-z0-9_]", "")
 
   key2
@@ -165,9 +167,8 @@ if (anyDuplicated(names(data))) {
 # -------------------------------
 
 annotation_rows <- c(
-  "AnimalID", "ReplicateGroup", "celltype", "celltype_layer", "layer", "region",
-  "group", "group2", "ExpGroup", "celltype_ExpGroup", "region_ExpGroup",
-  "celltype_layer_ExpGroup", "celltype_sublayer_ExpGroup", "plate",
+  "AnimalID", "ReplicateGroup", "sample_class",
+  "condition_code", "condition", "sample_class_condition", "plate",
   "sampleNumber", "shortname"
 )
 
@@ -300,10 +301,8 @@ written_index <- purrr::imap_dfr(by_comparison, function(cols, comp_key) {
 
     m <- stringr::str_match(
       comp_key,
-      "^([A-Za-z0-9]+)_([a-z]+)_([123])\\.over\\.([A-Za-z0-9]+)_([a-z]+)_([123])$"
+      "^([A-Za-z0-9]+)_([a-z]+)_([1234])\\.over\\.([A-Za-z0-9]+)_([a-z]+)_([1234])$"
     )
-
-    label_map <- c("1" = "con", "2" = "res", "3" = "sus")
 
     if (!is.na(m[1, 1])) {
       r1 <- m[1, 2]
@@ -314,16 +313,13 @@ written_index <- purrr::imap_dfr(by_comparison, function(cols, comp_key) {
       g2 <- m[1, 6]
       l2 <- m[1, 7]
 
-      left  <- paste0(r2, g2, label_map[[l2]])
-      right <- paste0(r1, g1, label_map[[l1]])
-
-      rev_comp <- paste0(left, "_", right)
+      rev_comp <- format_comparison(r2, g2, l2, r1, g1, l1)
 
     } else {
-      rev_comp <- swap_comparison(comp_key, TRUE)
-      rev_comp <- stringr::str_replace_all(rev_comp, "_1", "con")
-      rev_comp <- stringr::str_replace_all(rev_comp, "_2", "res")
-      rev_comp <- stringr::str_replace_all(rev_comp, "_3", "sus")
+      rev_comp <- swap_comparison(comp_key)
+      for (code in names(labels$condition_code_map)) {
+        rev_comp <- stringr::str_replace_all(rev_comp, paste0("_", code, "(?=($|_|\\.))"), paste0("_", labels$condition_code_map[[code]]))
+      }
       rev_comp <- stringr::str_replace_all(rev_comp, "[^A-Za-z0-9_]", "")
     }
 

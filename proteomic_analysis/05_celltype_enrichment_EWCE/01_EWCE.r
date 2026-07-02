@@ -1,5 +1,5 @@
 # ==========================================
-# EWCE E9: Nature-oriented proteomics workflow
+# EWCE: Neha proteomics workflow
 # ==========================================
 
 # This script keeps the original EWCE analysis intent, but adds:
@@ -45,7 +45,7 @@ invisible(lapply(bioc_packages, install_and_load, bioc = TRUE))
 # ==========================================
 
 data_path     <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Datasets/gct/data/imputed_data.xlsx"
-base_results  <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Results/EWCE_E9_Results"
+base_results  <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Results/EWCE_Results"
 sample_metadata_path <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Datasets/sample_metadata/"
 
 # create folders if needed and define parameters
@@ -60,9 +60,10 @@ analysis_params <- list(
   primary_top_n = 250,
   fdr_alpha = 0.05,
   marker_top_n = 200,
-  celltype = c("mcherry", "neuron", "cfos", "neuropil"),
-  conditions = c("veh-paired", "cno-paired", "veh-unpaired", "cno-unpaired"),
-  expgroup_condition_map = c("1" = "cno-paired", "2" = "veh-paired", "3" = "cno-unpaired", "4" = "veh-unpaired")
+  sample_class = c("mcherry", "neuropil", "cfos", "neuron"),
+  conditions = c("paired_cno", "paired_veh", "unpaired_cno", "unpaired_veh"),
+  reference_condition = "paired_veh",
+  expgroup_condition_map = c("1" = "paired_cno", "2" = "paired_veh", "3" = "unpaired_cno", "4" = "unpaired_veh")
 )
 
 dirs <- list(
@@ -88,7 +89,7 @@ input_hash <- if (file.exists(data_path)) digest::digest(file = data_path, algo 
 # 2. HELPERS
 # ==========================================
 
-theme_nature <- function() {
+theme_clean <- function() {
   ggplot2::theme_bw(base_size = 7) +
     ggplot2::theme(
       text = ggplot2::element_text(family = "sans", color = "black"),
@@ -118,7 +119,7 @@ safe_file_stem <- function(x) {
 }
 
 condition_reference <- function() {
-  analysis_params$conditions[1]
+  analysis_params$reference_condition
 }
 
 condition_contrasts <- function(present_conditions) {
@@ -163,13 +164,14 @@ normalize_sample_id <- function(x) {
 
 normalize_condition <- function(x) {
   x <- stringr::str_to_lower(as.character(x))
+  x <- stringr::str_replace_all(x, "-", "_")
   mapped <- unname(analysis_params$expgroup_condition_map[x])
   dplyr::if_else(!is.na(mapped), mapped, x)
 }
 
-normalize_celltype <- function(x) {
+normalize_sample_class <- function(x) {
   x <- stringr::str_to_lower(as.character(x))
-  dplyr::if_else(x %in% analysis_params$celltype, x, NA_character_)
+  dplyr::if_else(x %in% analysis_params$sample_class, x, NA_character_)
 }
 
 resolve_metadata_file <- function(metadata_path) {
@@ -194,7 +196,7 @@ load_sample_condition_lookup <- function(metadata_path) {
       Sample = character(),
       AnimalID = character(),
       Cond_Metadata = character(),
-      Celltype_Metadata = character()
+      SampleClass_Metadata = character()
     ))
   }
 
@@ -203,8 +205,8 @@ load_sample_condition_lookup <- function(metadata_path) {
 
   sample_col <- intersect(c("sample_id", "Sample", "sample", "SampleID"), colnames(meta_df))[1]
   animal_col <- intersect(c("AnimalID", "animal_id", "Animal", "animal"), colnames(meta_df))[1]
-  cond_col <- intersect(c("Cond", "Condition", "condition", "ExpGroup", "Group", "group"), colnames(meta_df))[1]
-  celltype_col <- intersect(c("celltype", "CellType", "cell_type", "Celltype", "celltype_layer"), colnames(meta_df))[1]
+  cond_col <- intersect(c("condition", "Condition", "Cond", "condition_code"), colnames(meta_df))[1]
+  sample_class_col <- intersect(c("sample_class", "SampleClass"), colnames(meta_df))[1]
 
   if (is.na(cond_col) || (is.na(sample_col) && is.na(animal_col))) {
     warning("Sample metadata file found but no usable sample/animal condition columns were detected: ", metadata_file)
@@ -212,7 +214,7 @@ load_sample_condition_lookup <- function(metadata_path) {
       Sample = character(),
       AnimalID = character(),
       Cond_Metadata = character(),
-      Celltype_Metadata = character()
+      SampleClass_Metadata = character()
     ))
   }
 
@@ -221,7 +223,7 @@ load_sample_condition_lookup <- function(metadata_path) {
       Sample = if (!is.na(sample_col)) normalize_sample_id(.data[[sample_col]]) else NA_character_,
       AnimalID = if (!is.na(animal_col)) as.character(.data[[animal_col]]) else stringr::str_match(Sample, "(?i)(?:^|_)(A[0-9]+)(?=_)")[, 2],
       Cond_Metadata = normalize_condition(.data[[cond_col]]),
-      Celltype_Metadata = if (!is.na(celltype_col)) normalize_celltype(.data[[celltype_col]]) else NA_character_
+      SampleClass_Metadata = if (!is.na(sample_class_col)) normalize_sample_class(.data[[sample_class_col]]) else NA_character_
     ) %>%
     dplyr::filter(!is.na(Cond_Metadata), Cond_Metadata %in% analysis_params$conditions) %>%
     dplyr::distinct()
@@ -238,11 +240,11 @@ parse_sample_metadata <- function(sample_names, condition_lookup = NULL) {
     by_sample <- condition_lookup %>%
       dplyr::filter(!is.na(Sample)) %>%
       dplyr::mutate(SampleKey = normalize_sample_id(Sample)) %>%
-      dplyr::distinct(SampleKey, Cond_Metadata, Celltype_Metadata)
+      dplyr::distinct(SampleKey, Cond_Metadata, SampleClass_Metadata)
 
     by_animal <- condition_lookup %>%
       dplyr::filter(!is.na(AnimalID)) %>%
-      dplyr::distinct(AnimalID, Cond_Animal = Cond_Metadata, Celltype_Animal = Celltype_Metadata)
+      dplyr::distinct(AnimalID, Cond_Animal = Cond_Metadata, SampleClass_Animal = SampleClass_Metadata)
 
     direct_meta <- direct_meta %>%
       dplyr::left_join(by_sample, by = "SampleKey") %>%
@@ -251,14 +253,14 @@ parse_sample_metadata <- function(sample_names, condition_lookup = NULL) {
     direct_meta <- direct_meta %>%
       dplyr::mutate(
         Cond_Metadata = NA_character_,
-        Celltype_Metadata = NA_character_,
+        SampleClass_Metadata = NA_character_,
         Cond_Animal = NA_character_,
-        Celltype_Animal = NA_character_
+        SampleClass_Animal = NA_character_
       )
   }
 
   resolved_meta <- direct_meta %>%
-    dplyr::select(Sample, AnimalID, Cond_Metadata, Celltype_Metadata, Cond_Animal, Celltype_Animal) %>%
+    dplyr::select(Sample, AnimalID, Cond_Metadata, SampleClass_Metadata, Cond_Animal, SampleClass_Animal) %>%
     dplyr::distinct() %>%
     dplyr::mutate(
       Cond_From_Name = extract_sample_token(Sample, analysis_params$conditions, case = "lower"),
@@ -267,18 +269,16 @@ parse_sample_metadata <- function(sample_names, condition_lookup = NULL) {
         normalize_condition(stringr::str_extract(stringr::str_to_lower(Sample), paste(analysis_params$conditions, collapse = "|"))),
         Cond_From_Name
       ),
-      Celltype_From_Name = extract_sample_token(Sample, analysis_params$celltype, case = "lower"),
+      SampleClass_From_Name = extract_sample_token(Sample, analysis_params$sample_class, case = "lower"),
       Cond_Resolved = dplyr::coalesce(Cond_From_Name, Cond_Metadata, Cond_Animal),
-      Celltype_Resolved = dplyr::coalesce(Celltype_From_Name, Celltype_Metadata, Celltype_Animal)
+      SampleClass_Resolved = dplyr::coalesce(SampleClass_From_Name, SampleClass_Metadata, SampleClass_Animal)
     ) %>%
-    dplyr::select(Sample, AnimalID, Cond_Resolved, Celltype_Resolved) %>%
+    dplyr::select(Sample, AnimalID, Cond_Resolved, SampleClass_Resolved) %>%
     dplyr::right_join(tibble::tibble(Sample = sample_names), by = "Sample")
 
   resolved_meta %>%
     dplyr::mutate(
-      Stratum = normalize_celltype(Celltype_Resolved),
-      Region = Stratum,
-      Layer = NA_character_,
+      Stratum = normalize_sample_class(SampleClass_Resolved),
       Cond = factor(Cond_Resolved, levels = analysis_params$conditions),
       Batch = stringr::str_extract(Sample, "(?i)(batch|plate|run)[-_]?[A-Za-z0-9]+")
     )
@@ -357,8 +357,6 @@ run_limma_stratum <- function(expr_mat, sample_meta, stratum) {
       tibble::as_tibble() %>%
       dplyr::mutate(
         Stratum = stratum,
-        Region = dplyr::first(meta$Region),
-        Layer = dplyr::first(meta$Layer),
         Contrast = coef_name,
         Direction_for_EWCE = dplyr::case_when(
           logFC > 0 ~ "up",
@@ -377,15 +375,11 @@ make_baseline_targets <- function(baseline_mat, top_n_values) {
     target_parts <- stringr::str_split_fixed(target, "__", 2)
     stratum <- target_parts[, 1]
     metric <- target_parts[, 2]
-    region <- stratum
-    layer <- NA_character_
     dplyr::bind_rows(lapply(top_n_values, function(top_n) {
       tibble::tibble(
         Target = target,
         AnalysisType = "Baseline",
         Stratum = stratum,
-        Region = region,
-        Layer = layer,
         Contrast = NA_character_,
         Direction = "abundant",
         Metric = metric,
@@ -402,8 +396,6 @@ make_differential_targets <- function(de_tbl, top_n_values) {
   dplyr::bind_rows(lapply(split(de_tbl, list(de_tbl$Stratum, de_tbl$Contrast), drop = TRUE), function(tbl) {
     if (nrow(tbl) == 0) return(tibble::tibble())
     stratum <- tbl$Stratum[1]
-    region <- tbl$Region[1]
-    layer <- tbl$Layer[1]
     contrast <- tbl$Contrast[1]
 
     dplyr::bind_rows(lapply(c("up", "down"), function(direction) {
@@ -419,8 +411,6 @@ make_differential_targets <- function(de_tbl, top_n_values) {
           Target = paste(stratum, contrast, direction, paste0("top", top_n), sep = "_"),
           AnalysisType = "Differential",
           Stratum = stratum,
-          Region = region,
-          Layer = layer,
           Contrast = contrast,
           Direction = direction,
           Metric = paste(contrast, direction, sep = "_"),
@@ -627,24 +617,24 @@ sample_meta <- parse_sample_metadata(colnames(expr_mat), condition_lookup)
 if (all(is.na(sample_meta$Cond))) {
   stop(
     "No sample conditions could be resolved. Provide condition tokens in sample names ",
-    "or set sample_metadata_path to a metadata file with AnimalID/sample_id and ExpGroup/Condition columns."
+    "or set sample_metadata_path to a metadata file with AnimalID/sample_id and condition_code/condition columns."
   )
 }
 if (all(is.na(sample_meta$Stratum))) {
   stop(
-    "No sample cell types could be resolved. Provide celltype tokens in sample names ",
-    "or set sample_metadata_path to a metadata file with sample_id/AnimalID and celltype columns."
+    "No sample classes could be resolved. Provide sample_class tokens in sample names ",
+    "or set sample_metadata_path to a metadata file with sample_id/AnimalID and sample_class columns."
   )
 }
 if (any(is.na(sample_meta$Cond))) {
   warning(sum(is.na(sample_meta$Cond)), " sample(s) have no resolved condition and will be excluded from contrasts.")
 }
 if (any(is.na(sample_meta$Stratum))) {
-  warning(sum(is.na(sample_meta$Stratum)), " sample(s) have no resolved celltype and will be excluded from signatures.")
+  warning(sum(is.na(sample_meta$Stratum)), " sample(s) have no resolved sample_class and will be excluded from signatures.")
 }
 sample_meta_qc <- sample_meta %>%
-  dplyr::count(Stratum, Region, Layer, Cond, name = "N_Samples") %>%
-  dplyr::arrange(Region, Layer, Cond)
+  dplyr::count(Stratum, Cond, name = "N_Samples") %>%
+  dplyr::arrange(Stratum, Cond)
 
 openxlsx::write.xlsx(
   list(SampleMetadata = sample_meta, SampleCounts = sample_meta_qc, ConditionLookup = condition_lookup),
@@ -676,8 +666,8 @@ baseline_mat <- long_df %>%
 
 analysis_strata <- sample_meta %>%
   dplyr::filter(!is.na(Stratum)) %>%
-  dplyr::distinct(Stratum, Region, Layer) %>%
-  dplyr::arrange(Region, Layer) %>%
+  dplyr::distinct(Stratum) %>%
+  dplyr::arrange(Stratum) %>%
   dplyr::pull(Stratum)
 
 de_tbl <- dplyr::bind_rows(lapply(analysis_strata, function(stratum) {
@@ -685,7 +675,7 @@ de_tbl <- dplyr::bind_rows(lapply(analysis_strata, function(stratum) {
 }))
 
 if (nrow(de_tbl) == 0) {
-  stop("No differential contrasts were created. Check sample names or metadata for celltype and condition labels.")
+  stop("No differential contrasts were created. Check sample names or metadata for sample_class and condition labels.")
 }
 
 target_gene_tbl <- dplyr::bind_rows(
@@ -694,7 +684,7 @@ target_gene_tbl <- dplyr::bind_rows(
 )
 
 target_manifest <- target_gene_tbl %>%
-  dplyr::group_by(Target, AnalysisType, Stratum, Region, Layer, Contrast, Direction, Metric, TopN) %>%
+  dplyr::group_by(Target, AnalysisType, Stratum, Contrast, Direction, Metric, TopN) %>%
   dplyr::summarise(
     N_Hits = dplyr::n_distinct(Gene),
     .groups = "drop"
@@ -751,8 +741,6 @@ run_ewce_target <- function(target_run) {
       Target = row$Target,
       AnalysisType = row$AnalysisType,
       Stratum = row$Stratum,
-      Region = row$Region,
-      Layer = row$Layer,
       Contrast = row$Contrast,
       Direction = row$Direction,
       Metric = row$Metric,
@@ -806,7 +794,7 @@ driver_overlap_tbl <- celltype_marker_overlap(
 )
 
 sensitivity_tbl <- results_all %>%
-  dplyr::group_by(AnalysisType, Stratum, Region, Layer, Metric, Direction, CellType, AnnotLevel) %>%
+  dplyr::group_by(AnalysisType, Stratum, Metric, Direction, CellType, AnnotLevel) %>%
   dplyr::summarise(
     N_TopN_Tested = dplyr::n_distinct(TopN),
     N_TopN_GlobalSig = dplyr::n_distinct(TopN[Significant_Global]),
@@ -818,17 +806,12 @@ sensitivity_tbl <- results_all %>%
   )
 
 # ==========================================
-# 5b. NATURE-ORIENTED SYNTHESIS (CACHE-PRESERVING)
+# 5b. analysis SYNTHESIS (CACHE-PRESERVING)
 # ==========================================
 
-message("Step 4b: Building Nature-oriented synthesis tables...")
+message("Step 4b: Building analysis synthesis tables...")
 
-stratum_order <- c(
-  "CA1_so", "CA1_sp", "CA1_sr", "CA1_slm",
-  "CA2_so", "CA2_sp", "CA2_sr", "CA2_slm",
-  "CA3_so", "CA3_sp", "CA3_sr", "CA3_slm",
-  "DG_mo", "DG_po", "DG_sg"
-)
+stratum_order <- analysis_params$sample_class
 observed_strata <- unique(stats::na.omit(c(results_all$Stratum, sample_meta$Stratum)))
 stratum_order <- c(stratum_order[stratum_order %in% observed_strata], sort(setdiff(observed_strata, stratum_order)))
 
@@ -886,7 +869,7 @@ sensitivity_tbl <- sensitivity_tbl %>%
   )
 
 annotation_consistency_tbl <- sensitivity_tbl %>%
-  dplyr::group_by(AnalysisType, Stratum, Region, Layer, Metric, Direction, CellType) %>%
+  dplyr::group_by(AnalysisType, Stratum, Metric, Direction, CellType) %>%
   dplyr::summarise(
     N_AnnotLevels_Tested = dplyr::n_distinct(AnnotLevel),
     N_AnnotLevels_With_GlobalSig = dplyr::n_distinct(AnnotLevel[N_TopN_GlobalSig > 0]),
@@ -905,31 +888,31 @@ high_confidence_hits <- primary_results %>%
     sensitivity_tbl %>%
       dplyr::filter(AnnotLevel == analysis_params$primary_annot_level) %>%
       dplyr::select(
-        AnalysisType, Stratum, Region, Layer, Metric, Direction, CellType,
+        AnalysisType, Stratum, Metric, Direction, CellType,
         N_TopN_Tested, N_TopN_GlobalSig, RobustnessScore, RobustAcrossTopN,
         Sensitivity_Min_q_global = Min_q_global,
         Sensitivity_Max_abs_Z = Max_abs_Z
       ),
-    by = c("AnalysisType", "Stratum", "Region", "Layer", "Metric", "Direction", "CellType")
+    by = c("AnalysisType", "Stratum", "Metric", "Direction", "CellType")
   ) %>%
   dplyr::left_join(
     annotation_consistency_tbl %>%
       dplyr::select(
-        AnalysisType, Stratum, Region, Layer, Metric, Direction, CellType,
+        AnalysisType, Stratum, Metric, Direction, CellType,
         N_AnnotLevels_Tested, N_AnnotLevels_With_GlobalSig, Mean_RobustnessScore, Max_RobustnessScore
       ),
-    by = c("AnalysisType", "Stratum", "Region", "Layer", "Metric", "Direction", "CellType")
+    by = c("AnalysisType", "Stratum", "Metric", "Direction", "CellType")
   ) %>%
   dplyr::arrange(q_global, dplyr::desc(abs(sd_from_mean))) %>%
   dplyr::select(
-    Stratum, Region, Layer, ContrastLabel, Direction, CellType,
+    Stratum, ContrastLabel, Direction, CellType,
     sd_from_mean, fold_change, p, q_target, q_global,
     RobustnessScore, RobustAcrossTopN, N_TopN_GlobalSig, N_TopN_Tested,
     N_AnnotLevels_With_GlobalSig, N_AnnotLevels_Tested,
     Target, Metric, TopN, AnnotLevel, N_Hits, N_Background
   )
 
-nature_top_celltypes <- primary_results %>%
+top_reference_celltypes <- primary_results %>%
   dplyr::filter(AnalysisType == "Differential") %>%
   dplyr::group_by(CellType) %>%
   dplyr::summarise(
@@ -942,14 +925,14 @@ nature_top_celltypes <- primary_results %>%
   dplyr::arrange(!Any_GlobalSignificant, Best_q_global, dplyr::desc(Max_abs_Z)) %>%
   dplyr::slice_head(n = 35)
 
-nature_diff_heatmap_tbl <- primary_results %>%
-  dplyr::filter(AnalysisType == "Differential", CellType %in% nature_top_celltypes$CellType) %>%
+primary_diff_heatmap_tbl <- primary_results %>%
+  dplyr::filter(AnalysisType == "Differential", CellType %in% top_reference_celltypes$CellType) %>%
   dplyr::mutate(
-    CellType = factor(CellType, levels = rev(nature_top_celltypes$CellType)),
+    CellType = factor(CellType, levels = rev(top_reference_celltypes$CellType)),
     Stratum = factor(Stratum, levels = stratum_order)
   )
 
-nature_robust_tbl <- sensitivity_tbl %>%
+robust_findings_tbl <- sensitivity_tbl %>%
   dplyr::filter(AnalysisType == "Differential", AnnotLevel == analysis_params$primary_annot_level) %>%
   dplyr::arrange(Min_q_global, dplyr::desc(Max_abs_Z)) %>%
   dplyr::mutate(
@@ -959,14 +942,14 @@ nature_robust_tbl <- sensitivity_tbl %>%
   dplyr::slice_head(n = 35)
 
 # ==========================================
-# 6. NATURE-STYLE VISUALIZATION
+# 6. clean VISUALIZATION
 # ==========================================
 
-message("Step 5: Building publication and extended-data figures...")
+message("Step 5: Building summary and extended figures...")
 
 col_baseline <- "#4E79A7"
-col_sus      <- "#D55E00"
-col_res      <- "#0072B2"
+col_case      <- "#D55E00"
+col_reference      <- "#0072B2"
 col_down     <- "#009E73"
 
 baseline_plot_tbl <- primary_results %>%
@@ -987,7 +970,7 @@ p1 <- ggplot2::ggplot(
   viridis::scale_color_viridis(option = "magma", name = "Z-score") +
   ggplot2::scale_size_area(max_size = 3, name = "|Z|") +
   ggplot2::scale_alpha_manual(values = c("FALSE" = 0.35, "TRUE" = 1), name = "Global FDR < 0.05") +
-  theme_nature() +
+  theme_clean() +
   ggplot2::labs(x = NULL, y = "Cell type", title = "Baseline cell-type enrichment") +
   ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
 
@@ -1006,16 +989,16 @@ p2 <- ggplot2::ggplot(
     fill = "black"
   ) +
   ggplot2::facet_wrap(~Stratum, nrow = 1) +
-  ggplot2::scale_fill_gradient2(low = col_res, mid = "white", high = col_sus, midpoint = 0, name = "Z-score") +
-  theme_nature() +
+  ggplot2::scale_fill_gradient2(low = col_reference, mid = "white", high = col_case, midpoint = 0, name = "Z-score") +
+  theme_clean() +
   ggplot2::labs(x = NULL, y = "Cell type", title = "Modeled stress contrasts") +
   ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
 
 p3 <- ggplot2::ggplot(primary_results, ggplot2::aes(x = sd_from_mean, y = -log10(q_global))) +
   ggplot2::geom_point(ggplot2::aes(color = AnalysisType), alpha = 0.65, size = 1) +
-  ggplot2::scale_color_manual(values = c("Baseline" = col_baseline, "Differential" = col_sus)) +
+  ggplot2::scale_color_manual(values = c("Baseline" = col_baseline, "Differential" = col_case)) +
   ggplot2::geom_hline(yintercept = -log10(analysis_params$fdr_alpha), linetype = "dashed", linewidth = 0.2) +
-  theme_nature() +
+  theme_clean() +
   ggplot2::labs(x = "Effect size (Z-score)", y = "-log10(global FDR)", title = "EWCE significance")
 
 p4 <- ggplot2::ggplot(
@@ -1024,8 +1007,8 @@ p4 <- ggplot2::ggplot(
 ) +
   ggplot2::geom_tile(color = "white", linewidth = 0.1) +
   ggplot2::facet_wrap(~Stratum, nrow = 1) +
-  ggplot2::scale_fill_gradient2(low = col_res, mid = "white", high = col_sus, midpoint = 0, name = "Signed -log10(FDR)") +
-  theme_nature() +
+  ggplot2::scale_fill_gradient2(low = col_reference, mid = "white", high = col_case, midpoint = 0, name = "Signed -log10(FDR)") +
+  theme_clean() +
   ggplot2::labs(x = NULL, y = "Cell type", title = "Direction and global significance") +
   ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
 
@@ -1046,7 +1029,7 @@ p5 <- ggplot2::ggplot(
   ggplot2::geom_col(width = 0.8) +
   ggplot2::coord_flip() +
   viridis::scale_fill_viridis(option = "plasma", name = "-log10(global FDR)") +
-  theme_nature() +
+  theme_clean() +
   ggplot2::labs(x = NULL, y = "Max |Z-score|", title = "Top cell-type effects")
 
 p6 <- ggplot2::ggplot(
@@ -1054,9 +1037,9 @@ p6 <- ggplot2::ggplot(
   ggplot2::aes(x = sd_from_mean, y = Stratum, fill = Direction)
 ) +
   ggridges::geom_density_ridges(alpha = 0.7, scale = 0.9, color = "white", linewidth = 0.2) +
-  ggplot2::scale_fill_manual(values = c("up" = col_sus, "down" = col_down), guide = "none") +
+  ggplot2::scale_fill_manual(values = c("up" = col_case, "down" = col_down), guide = "none") +
   ggplot2::geom_vline(xintercept = 0, linetype = "dashed", linewidth = 0.2) +
-  theme_nature() +
+  theme_clean() +
   ggplot2::labs(x = "Z-score", y = NULL, title = "Stratum effect distributions")
 
 p7 <- ggplot2::ggplot(
@@ -1072,17 +1055,17 @@ p7 <- ggplot2::ggplot(
 ) +
   ggplot2::geom_col(width = 0.8) +
   ggplot2::coord_flip() +
-  ggplot2::scale_fill_manual(values = c("FALSE" = "grey70", "TRUE" = col_sus), name = "Robust") +
-  theme_nature() +
+  ggplot2::scale_fill_manual(values = c("FALSE" = "grey70", "TRUE" = col_case), name = "Robust") +
+  theme_clean() +
   ggplot2::labs(x = NULL, y = "Significant top-N settings", title = "Hit-list sensitivity")
 
-nature_heatmap_fig <- ggplot2::ggplot(
-  nature_diff_heatmap_tbl,
+primary_heatmap_fig <- ggplot2::ggplot(
+  primary_diff_heatmap_tbl,
   ggplot2::aes(x = Stratum, y = CellType, fill = SignedSig_Global_Capped)
 ) +
   ggplot2::geom_tile(color = "white", linewidth = 0.12) +
   ggplot2::geom_point(
-    data = nature_diff_heatmap_tbl %>% dplyr::filter(Significant_Global),
+    data = primary_diff_heatmap_tbl %>% dplyr::filter(Significant_Global),
     ggplot2::aes(x = Stratum, y = CellType),
     inherit.aes = FALSE,
     shape = 21,
@@ -1093,14 +1076,14 @@ nature_heatmap_fig <- ggplot2::ggplot(
   ) +
   ggplot2::facet_grid(. ~ MetricLabel, scales = "free_x", space = "free_x") +
   ggplot2::scale_fill_gradient2(
-    low = col_res,
+    low = col_reference,
     mid = "white",
-    high = col_sus,
+    high = col_case,
     midpoint = 0,
     limits = c(-10, 10),
     name = "Signed\n-log10(FDR)"
   ) +
-  theme_nature() +
+  theme_clean() +
   ggplot2::labs(
     x = NULL,
     y = "Cell type",
@@ -1112,8 +1095,8 @@ nature_heatmap_fig <- ggplot2::ggplot(
     legend.position = "right"
   )
 
-nature_robustness_fig <- ggplot2::ggplot(
-  nature_robust_tbl,
+robustness_fig <- ggplot2::ggplot(
+  robust_findings_tbl,
   ggplot2::aes(x = RobustnessScore, y = FindingLabel)
 ) +
   ggplot2::geom_col(ggplot2::aes(fill = RobustAcrossTopN), width = 0.75) +
@@ -1123,10 +1106,10 @@ nature_robustness_fig <- ggplot2::ggplot(
     stroke = 0.2
   ) +
   ggplot2::scale_x_continuous(limits = c(0, 1), breaks = c(0, 0.5, 1)) +
-  ggplot2::scale_fill_manual(values = c("FALSE" = "grey75", "TRUE" = col_sus), name = "Robust\nall Top-N") +
+  ggplot2::scale_fill_manual(values = c("FALSE" = "grey75", "TRUE" = col_case), name = "Robust\nall Top-N") +
   viridis::scale_color_viridis(option = "plasma", name = "-log10\nmin FDR") +
   ggplot2::scale_size_area(max_size = 3.2, name = "Max |Z|") +
-  theme_nature() +
+  theme_clean() +
   ggplot2::labs(
     x = "Fraction of Top-N settings significant",
     y = NULL,
@@ -1165,16 +1148,16 @@ ggplot2::ggsave(file.path(dirs$svgs, "Fig1_EWCE_Summary.svg"), main_fig, width =
 ggplot2::ggsave(file.path(dirs$svgs, "Volcano_Panel.svg"), p3, width = 80, height = 80, units = "mm")
 ggplot2::ggsave(file.path(dirs$plots, "FigS1_EWCE_Additional_Visuals.pdf"), supp_fig, width = 180, height = 280, units = "mm", device = grDevices::cairo_pdf)
 ggplot2::ggsave(file.path(dirs$svgs, "FigS1_EWCE_Additional_Visuals.svg"), supp_fig, width = 180, height = 280, units = "mm")
-ggplot2::ggsave(file.path(dirs$plots, "Fig2_Primary_Differential_EWCE_Heatmap.pdf"), nature_heatmap_fig, width = 183, height = 170, units = "mm", device = grDevices::cairo_pdf)
-ggplot2::ggsave(file.path(dirs$svgs, "Fig2_Primary_Differential_EWCE_Heatmap.svg"), nature_heatmap_fig, width = 183, height = 170, units = "mm")
-ggplot2::ggsave(file.path(dirs$plots, "Fig3_Robust_EWCE_Findings.pdf"), nature_robustness_fig, width = 183, height = 160, units = "mm", device = grDevices::cairo_pdf)
-ggplot2::ggsave(file.path(dirs$svgs, "Fig3_Robust_EWCE_Findings.svg"), nature_robustness_fig, width = 183, height = 160, units = "mm")
+ggplot2::ggsave(file.path(dirs$plots, "Fig2_Primary_Differential_EWCE_Heatmap.pdf"), primary_heatmap_fig, width = 183, height = 170, units = "mm", device = grDevices::cairo_pdf)
+ggplot2::ggsave(file.path(dirs$svgs, "Fig2_Primary_Differential_EWCE_Heatmap.svg"), primary_heatmap_fig, width = 183, height = 170, units = "mm")
+ggplot2::ggsave(file.path(dirs$plots, "Fig3_Robust_EWCE_Findings.pdf"), robustness_fig, width = 183, height = 160, units = "mm", device = grDevices::cairo_pdf)
+ggplot2::ggsave(file.path(dirs$svgs, "Fig3_Robust_EWCE_Findings.svg"), robustness_fig, width = 183, height = 160, units = "mm")
 
 if (nrow(diff_heatmap_mat) > 2 && ncol(diff_heatmap_mat) > 2) {
   grDevices::pdf(file.path(dirs$plots, "FigS2_EWCE_ClusteredHeatmap.pdf"), width = 8, height = 10, family = "sans")
   pheatmap::pheatmap(
     diff_heatmap_mat,
-    color = grDevices::colorRampPalette(c(col_res, "white", col_sus))(101),
+    color = grDevices::colorRampPalette(c(col_reference, "white", col_case))(101),
     border_color = NA,
     fontsize = 6,
     fontsize_row = 5,
@@ -1186,7 +1169,7 @@ if (nrow(diff_heatmap_mat) > 2 && ncol(diff_heatmap_mat) > 2) {
 }
 
 summary_tbl <- results_all %>%
-  dplyr::group_by(AnalysisType, AnnotLevel, TopN, Stratum, Region, Layer, Metric) %>%
+  dplyr::group_by(AnalysisType, AnnotLevel, TopN, Stratum, Metric) %>%
   dplyr::summarise(
     N_Tested = dplyr::n(),
     N_GlobalSignificant = sum(Significant_Global, na.rm = TRUE),
@@ -1198,7 +1181,7 @@ summary_tbl <- results_all %>%
     Best_q_global = min(q_global, na.rm = TRUE),
     .groups = "drop"
   ) %>%
-  dplyr::arrange(AnalysisType, AnnotLevel, TopN, Region, Layer, dplyr::desc(N_GlobalSignificant), dplyr::desc(Mean_Abs_Effect))
+  dplyr::arrange(AnalysisType, AnnotLevel, TopN, Stratum, dplyr::desc(N_GlobalSignificant), dplyr::desc(Mean_Abs_Effect))
 
 top_hits_tbl <- results_all %>%
   dplyr::group_by(Target, AnnotLevel) %>%
@@ -1206,7 +1189,7 @@ top_hits_tbl <- results_all %>%
   dplyr::slice_head(n = 15) %>%
   dplyr::ungroup() %>%
   dplyr::select(
-    Target, AnalysisType, AnnotLevel, TopN, Stratum, Region, Layer, Metric, Direction,
+    Target, AnalysisType, AnnotLevel, TopN, Stratum, Metric, Direction,
     CellType, sd_from_mean, p, q_target, q_global, SignedSig_Global, N_Hits, N_Background
   )
 
@@ -1247,13 +1230,13 @@ add_worksheet_safe(wb, "Input_Gene_Stats", input_gene_stats)
 add_worksheet_safe(wb, "Sample_Counts", sample_meta_qc)
 openxlsx::saveWorkbook(wb, file.path(dirs$tables, "Supplementary_Table_EWCE.xlsx"), overwrite = TRUE)
 
-nature_wb <- openxlsx::createWorkbook()
-add_worksheet_safe(nature_wb, "High_Confidence_Findings", high_confidence_hits)
-add_worksheet_safe(nature_wb, "Primary_Diff_Heatmap_Data", nature_diff_heatmap_tbl)
-add_worksheet_safe(nature_wb, "Robustness_Data", nature_robust_tbl)
-add_worksheet_safe(nature_wb, "Annotation_Consistency", annotation_consistency_tbl)
-add_worksheet_safe(nature_wb, "Top_CellTypes", nature_top_celltypes)
-openxlsx::saveWorkbook(nature_wb, file.path(dirs$tables, "High_Confidence_EWCE_Findings.xlsx"), overwrite = TRUE)
+high_confidence_wb <- openxlsx::createWorkbook()
+add_worksheet_safe(high_confidence_wb, "High_Confidence_Findings", high_confidence_hits)
+add_worksheet_safe(high_confidence_wb, "Primary_Diff_Heatmap_Data", primary_diff_heatmap_tbl)
+add_worksheet_safe(high_confidence_wb, "Robustness_Data", robust_findings_tbl)
+add_worksheet_safe(high_confidence_wb, "Annotation_Consistency", annotation_consistency_tbl)
+add_worksheet_safe(high_confidence_wb, "Top_CellTypes", top_reference_celltypes)
+openxlsx::saveWorkbook(high_confidence_wb, file.path(dirs$tables, "High_Confidence_EWCE_Findings.xlsx"), overwrite = TRUE)
 
 source_wb <- openxlsx::createWorkbook()
 add_worksheet_safe(source_wb, "Fig1A_Baseline_Dotplot", primary_results %>% dplyr::filter(AnalysisType == "Baseline", Significant_Global))
@@ -1263,8 +1246,8 @@ add_worksheet_safe(source_wb, "FigS1A_Signed_Heatmap", primary_results %>% dplyr
 add_worksheet_safe(source_wb, "FigS1B_Top_CellTypes", top_celltypes)
 add_worksheet_safe(source_wb, "FigS1C_Distributions", primary_results %>% dplyr::filter(AnalysisType == "Differential"))
 add_worksheet_safe(source_wb, "FigS1D_Sensitivity", sensitivity_tbl)
-add_worksheet_safe(source_wb, "Fig2_Primary_Heatmap", nature_diff_heatmap_tbl)
-add_worksheet_safe(source_wb, "Fig3_Robust_Findings", nature_robust_tbl)
+add_worksheet_safe(source_wb, "Fig2_Primary_Heatmap", primary_diff_heatmap_tbl)
+add_worksheet_safe(source_wb, "Fig3_Robust_Findings", robust_findings_tbl)
 openxlsx::saveWorkbook(source_wb, file.path(dirs$source, "Source_Data_EWCE_Figures.xlsx"), overwrite = TRUE)
 
 saveRDS(
@@ -1280,8 +1263,8 @@ saveRDS(
     mapping_qc = mapping_qc,
     high_confidence_hits = high_confidence_hits,
     annotation_consistency_tbl = annotation_consistency_tbl,
-    nature_diff_heatmap_tbl = nature_diff_heatmap_tbl,
-    nature_robust_tbl = nature_robust_tbl,
+    primary_diff_heatmap_tbl = primary_diff_heatmap_tbl,
+    robust_findings_tbl = robust_findings_tbl,
     analysis_params = analysis_params
   ),
   file.path(dirs$data, "EWCE_results_full.rds")
@@ -1306,3 +1289,6 @@ reproducibility_lines <- c(
 writeLines(reproducibility_lines, file.path(dirs$qc, "reproducibility_session_info.txt"))
 
 cat("\nPipeline complete. Files organized in:", base_results, "\n")
+
+
+

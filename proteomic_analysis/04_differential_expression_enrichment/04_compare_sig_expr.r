@@ -25,7 +25,7 @@
   #'    - Side-by-side comparison heatmaps (Reference vs. Experiment).
   #'    - Correlation scatter plots with linear regression.
   #' 
-  #' @param COMP_TYPE Input string (e.g., "mcherry") used to filter `celltype` in metadata and define output filenames.
+  #' @param COMP_TYPE Input string (e.g., "mcherry") used to filter `sample_class` in metadata and define output filenames.
   #' @param GCT_FILE_PATH Path to the source .gct file containing unnormalized protein matrix and header metadata.
   #' @param SIG_PATH Directory path containing reference Excel files for the learning signature (matching pattern `log2fc_.*_(down|up)regulated_all.xlsx`).
   #' 
@@ -106,28 +106,28 @@
   sample_anno[] <- lapply(sample_anno, function(x) if (is.character(x)) trimws(x) else x)
   sample_anno$sample_id <- colnames(expr_mat)
 
-  # Process 'ExpGroup' factor.
-  if (!"ExpGroup" %in% colnames(sample_anno)) {
-    warning("Metadata 'ExpGroup' not found. Available: ", paste(colnames(sample_anno), collapse = ", "))
+  # Process 'condition_code' factor.
+  if (!"condition_code" %in% colnames(sample_anno)) {
+    warning("Metadata 'condition_code' not found. Available: ", paste(colnames(sample_anno), collapse = ", "))
   } else {
-    sample_anno$ExpGroup <- factor(as.numeric(sample_anno$ExpGroup),
+    sample_anno$condition_code <- factor(as.numeric(sample_anno$condition_code),
                                   levels = c(1, 2, 3, 4),
                                   labels = c("1", "2", "3", "4"))
   }
 
-  # Filter by 'celltype' based on configuration.
-  if ("celltype" %in% colnames(sample_anno)) {
-    keep_samples <- sample_anno$sample_id[sample_anno$celltype == COMP_TYPE]
+  # Filter by 'sample_class' based on configuration.
+  if ("sample_class" %in% colnames(sample_anno)) {
+    keep_samples <- sample_anno$sample_id[sample_anno$sample_class == COMP_TYPE]
     
     if (length(keep_samples) > 0) {
       sample_anno <- sample_anno[sample_anno$sample_id %in% keep_samples, ]
       expr_mat    <- expr_mat[, keep_samples, drop = FALSE]
       message(sprintf("Filtered to %d %s samples.", length(keep_samples), COMP_TYPE))
     } else {
-      warning(sprintf("No samples found with celltype == '%s'.", COMP_TYPE))
+      warning(sprintf("No samples found with sample_class == '%s'.", COMP_TYPE))
     }
   } else {
-    warning("Column 'celltype' not found in metadata.")
+    warning("Column 'sample_class' not found in metadata.")
   }
 
   ## ---------- 4. Data Loading: Learning Signature ----------
@@ -166,8 +166,8 @@
   ## ---------- 5. Statistics: Calculate Differential Effect & Z-Scores ----------
 
   # Define groups (1 = CNO, 2 = VEH).
-  cno_samples <- intersect(sample_anno$sample_id[sample_anno$ExpGroup == "1"], colnames(expr_mat))
-  veh_samples <- intersect(sample_anno$sample_id[sample_anno$ExpGroup == "2"], colnames(expr_mat))
+  cno_samples <- intersect(sample_anno$sample_id[sample_anno$condition_code == "1"], colnames(expr_mat))
+  veh_samples <- intersect(sample_anno$sample_id[sample_anno$condition_code == "2"], colnames(expr_mat))
 
   if (length(cno_samples) == 0 || length(veh_samples) == 0) stop("No samples found for CNO or VEH groups.")
 
@@ -209,12 +209,12 @@
   ann_colors <- list()
 
   # Helper to assign colors safely if the column exists/is not empty
-  unique_exp <- if(!all(is.na(sample_anno$ExpGroup))) unique(sample_anno$ExpGroup) else NULL
+  unique_exp <- if(!all(is.na(sample_anno$condition_code))) unique(sample_anno$condition_code) else NULL
   unique_ld  <- unique(learn_annot_z$learning_dir)
   unique_cd  <- unique(learn_annot_z$cno_dir)
   unique_sd  <- unique(learn_annot_z$same_direction)
 
-  if (!is.null(unique_exp)) ann_colors$ExpGroup       <- setNames(brewer.pal(max(2, length(unique_exp)), "Set1")[seq_along(unique_exp)], unique_exp)
+  if (!is.null(unique_exp)) ann_colors$condition_code       <- setNames(brewer.pal(max(2, length(unique_exp)), "Set1")[seq_along(unique_exp)], unique_exp)
   if (!is.null(unique_ld))  ann_colors$learning_dir   <- setNames(c("#e31a1c", "#1f78b4")[seq_along(unique_ld)], unique_ld)
   if (!is.null(unique_cd))  ann_colors$cno_dir        <- setNames(c("#fb9a99", "#a6cee3")[seq_along(unique_cd)], unique_cd)
   if (!is.null(unique_sd))  ann_colors$same_direction <- setNames(c("#33a02c", "#e31a1c")[seq_along(unique_sd)], unique_sd)
@@ -242,7 +242,7 @@
 
   # Annotations
   col_anno <- data.frame(row.names = colnames(expr_learning_scaled),
-                        ExpGroup = sample_anno$ExpGroup[match(colnames(expr_learning_scaled), sample_anno$sample_id)])
+                        condition_code = sample_anno$condition_code[match(colnames(expr_learning_scaled), sample_anno$sample_id)])
 
   row_anno <- learn_annot_z %>% 
     dplyr::select(`UniProtKB-ID`, learning_dir, cno_dir, same_direction) %>% distinct() %>%
@@ -259,9 +259,9 @@
     width = 7, height = 8
   )
 
-  ## --- Plot C: Averaged Expression per ExpGroup ---
+  ## --- Plot C: Averaged Expression per condition_code ---
   expr_learning_all <- expr_mat[learn_ids, , drop = FALSE]
-  group_vec <- sample_anno$ExpGroup[match(colnames(expr_learning_all), sample_anno$sample_id)]
+  group_vec <- sample_anno$condition_code[match(colnames(expr_learning_all), sample_anno$sample_id)]
 
   # Calculate averages
   avg_list <- lapply(sort(unique(group_vec)), function(g) {
@@ -278,7 +278,7 @@
     avg_expr_scaled,
     annotation_row = row_anno_avg, annotation_colors = ann_colors,
     color = heatmap_cols, cluster_rows = TRUE, cluster_cols = FALSE, show_rownames = FALSE,
-    main = paste0("Average Expression per ExpGroup - ", COMP_TYPE),
+    main = paste0("Average Expression per condition_code - ", COMP_TYPE),
     filename = file.path(DIR_PLOTS, paste0("heatmap_learning_signature_avg_per_group_", COMP_TYPE, ".pdf")),
     width = 5, height = 8
   )
@@ -358,3 +358,4 @@
 
   ggsave(file.path(DIR_PLOTS, paste0("scatter_learning_logfc_vs_cno_logfc_", COMP_TYPE, ".svg")),
         plot = p_scatter_fc, width = 4, height = 6)
+

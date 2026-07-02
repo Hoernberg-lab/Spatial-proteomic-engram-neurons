@@ -63,8 +63,8 @@ pacman::p_load(ggplot2, stringr, ggpubr, ggthemes, dplyr, tidyr, purrr,
 # -----------------------------------------------------
 # Define Theme and Helper Functions
 # -----------------------------------------------------
-#' Nature-style ggplot2 theme for publication-quality figures
-theme_nature <- function(base_size = 9, base_family = "sans") {
+#' Clean ggplot2 theme for report-quality figures
+theme_clean <- function(base_size = 9, base_family = "sans") {
   theme_minimal(base_size = base_size, base_family = base_family) +
     theme(
       # Text elements
@@ -109,11 +109,11 @@ theme_nature <- function(base_size = 9, base_family = "sans") {
     )
 }
 
-#' Dynamically calculate plot dimensions based on data content (publication-optimized)
+#' Dynamically calculate plot dimensions based on data content (report-optimized)
 calc_dims <- function(df_plot) {
   n_cols <- length(unique(as.character(df_plot$Comparison)))
   n_rows <- length(unique(as.character(df_plot$Description)))
-  # Nature-style: optimize for single or dual column layouts (85mm or 180mm)
+  # Clean: optimize for single or dual column layouts (85mm or 180mm)
   w <- max(3.35, 3.35 + (n_cols * 0.5))  # Single column width ~85mm = 3.35 inches
   h <- max(5, 2.5 + (n_rows * 0.25))
   return(list(w = w, h = h))
@@ -698,7 +698,7 @@ if(nrow(candidate_pool) == 0) {
 # Plot Comparison: Standard vs Refined Selection
 # -----------------------------------------------------
 
-# Nature-style color palettes: Professional, publication-ready colors
+# Clean color palettes: Professional, report-ready colors
 # Upregulation = warm orange/red, downregulation = cool blue, 0 = white
 custom_palette <- colorRampPalette(c("#0571B0", "white", "#CA0020"), space = "Lab")
 
@@ -755,7 +755,7 @@ if (nrow(comparison_plot_data) == 0 || all(is.na(comparison_plot_data$NES))) {
       y = "GO Term",
       x = "Comparison"
     ) +
-    theme_nature(base_size = 9) +
+    theme_clean(base_size = 9) +
     theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
 
   n_cols_comp <- length(unique(as.character(comparison_plot_data$Comparison)))
@@ -957,7 +957,7 @@ if (exists("top_df_per_comp") && nrow(top_df_per_comp) > 0) {
         x = NULL,
         y = NULL
       ) +
-      theme_nature(base_size = 9) +
+      theme_clean(base_size = 9) +
       theme(
         axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
         panel.grid.major.y = element_blank(),
@@ -1008,7 +1008,7 @@ if (exists("top_terms") && length(top_terms) > 0) {
         x = NULL,
         y = NULL
       ) +
-      theme_nature(base_size = 9) +
+      theme_clean(base_size = 9) +
       theme(
         axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
         panel.grid.major.y = element_blank()
@@ -1059,7 +1059,7 @@ if (exists("top5_up_down_df") && !is.null(top5_up_down_df) && nrow(top5_up_down_
       x = NULL,
       y = NULL
     ) +
-    theme_nature(base_size = 9) +
+    theme_clean(base_size = 9) +
     theme(
       axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
       panel.grid.major.y = element_blank()
@@ -1370,7 +1370,7 @@ info_text <- paste0(
   "Red = upregulated, Blue = downregulated, NES = Normalized Enrichment Score"
 )
 
-# Save the heatmap as SVG for publication-quality output
+# Save the heatmap as SVG for report-quality output
 svg(file.path(subdirs$plots_main, "Heatmap_TopBottom_Enrichment.svg"), width = 4.5, height = 8.5, family="sans", pointsize = 10)
 grid::grid.draw(top_bottom_plot$gtable)
 dev.off()
@@ -1466,7 +1466,7 @@ for (comp in unique_comparisons) {
       x = expression(log[2] ~ Fold ~ Change),
       y = expression(-log[10](italic(P)[adj]))
     ) +
-    theme_nature(base_size = 9) +
+    theme_clean(base_size = 9) +
     theme(
       legend.position = "none"
     ) +
@@ -1693,7 +1693,7 @@ barplot_counts <- ggplot(term_counts, aes(x = Comparison, y = Count, fill = Dire
     y = "Number of significant terms (padj < 0.05)",
     fill = "Direction"
   ) +
-  theme_nature(base_size = 9) +
+  theme_clean(base_size = 9) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
 
 ggsave(file.path(subdirs$plots_main, "Barplot_Term_Counts.svg"), 
@@ -1716,7 +1716,7 @@ if (nrow(ridge_data) > 0 && length(unique(ridge_data$Comparison)) > 0) {
       x = "Normalized Enrichment Score (NES)",
       y = "Comparison"
     ) +
-    theme_nature(base_size = 9) +
+    theme_clean(base_size = 9) +
     theme(axis.text.y = element_text(size = 8))
   
   ggsave(file.path(subdirs$plots_main, "RidgePlot_NES_Distribution.svg"),
@@ -2101,7 +2101,7 @@ if (exists("term_consistency") && nrow(term_consistency) > 0) {
         scale_fill_manual(values = c("Up" = "#CA0020", "Down" = "#0571B0")) +
         labs(title = "Term direction persistence across comparisons",
              y = "Frequency", fill = "Direction") +
-        theme_nature(base_size = 9) +
+        theme_clean(base_size = 9) +
         theme(axis.text.x = element_text(angle = 45, hjust = 1))
       
       print(p_alluvial)
@@ -2229,7 +2229,7 @@ if (length(comparison_files) > 0) {
                 title = paste0("Upregulated GO - ", comp),
                 y = "GO Term"
               ) +
-              theme_nature(base_size = 9) +
+              theme_clean(base_size = 9) +
               theme(
                 legend.position = "right"
               )
@@ -2287,7 +2287,7 @@ if (length(comparison_files) > 0) {
                 title = paste0("Downregulated GO - ", comp),
                 y = "GO Term"
               ) +
-              theme_nature(base_size = 9) +
+              theme_clean(base_size = 9) +
               theme(
                 legend.position = "right"
               )
@@ -2362,7 +2362,7 @@ core_long_df %>%
       }
     }
     plot_height <- max(4, nrow(heatmap_matrix) * 0.15 + 1)
-    # Save SVG only for publication-quality output
+    # Save SVG only for report-quality output
     svg(filename_svg, width = 5, height = plot_height, family = "sans", pointsize = 9)
     pheatmap(
       heatmap_matrix,
@@ -2436,7 +2436,7 @@ if (!all(c("gene_symbol", "log2fc", "padj", "Comparison") %in% names(log2fc_long
         x = NULL,
         y = "Gene"
       ) +
-      theme_nature(base_size = 9) +
+      theme_clean(base_size = 9) +
       theme(
         axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)
       )
@@ -2823,7 +2823,7 @@ summary_message <- paste0(
   "  4. Review gene importance rankings\n",
   "  5. Examine redundancy report\n",
   "\n",
-  "RECOMMENDED PUBLICATIONS FIGURES:\n",
+  "RECOMMENDED SUMMARY FIGURES:\n",
   "  • Main: Heatmap_Enrichment_Comparisons.svg\n",
   "  • Main: Dotplot_Enrichment_TopGenes_Overall.svg\n",
   "  • Supplementary: Barplot_Term_Counts.svg\n",
@@ -3137,3 +3137,4 @@ if (exists("supp_output_path") && file.exists(supp_output_path)) {
 # Write log file
 writeLines(unlist(log_lines), con = log_file)
 message("Analysis log written to: ", log_file)
+

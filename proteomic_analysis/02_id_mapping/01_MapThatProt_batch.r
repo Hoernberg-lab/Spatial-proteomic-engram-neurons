@@ -34,7 +34,7 @@ if (!requireNamespace("pacman", quietly = TRUE)) install.packages("pacman")
 pacman::p_load(dplyr, stringr, tidyr, purrr, readr, R.utils, foreach, doParallel, readxl, AnnotationDbi, org.Mm.eg.db, UniProt.ws)
 
 # --- Configuration & Experimental Settings ---
-mapped_comparisons <- "neuron_neuropil"  # specify the comparison folder to process
+mapped_comparisons <- "neuropil"  # specify the comparison folder to process
 map_reverse <- TRUE
 
 cat("Target Comparison:", mapped_comparisons, "\n")
@@ -907,3 +907,4 @@ cat("Saved master QC workbook to:", report_file, "\n")
 cat("====================================================\n")
 cat("MapThatProt_batch execution completed successfully!\n")
 cat("====================================================\n")
+

@@ -1,6 +1,6 @@
 # ================================================================
-# Manuscript-grade QC figures for spatial proteomics
-# Ring-free Nature-style version
+# QC figures for Neha proteomics
+# Clean QC plotting workflow
 # ================================================================
 
 suppressPackageStartupMessages({
@@ -20,9 +20,9 @@ suppressPackageStartupMessages({
 # 1. Paths
 # ================================================================
 
-input_file <- "S:/Lab_Member/Tobi/Experiments/Exp9_Social-Stress/proteomics/Datasets/pg_matrix/raw/quicksearch.stats.annotated.xlsx"
+input_file <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Datasets/pg_matrix/raw/quicksearch.stats.annotated.xlsx"
 
-out_dir <- "S:/Lab_Member/Tobi/Experiments/Exp9_Social-Stress/proteomics/Results/QC_Nature/"
+out_dir <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Results/QC/"
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 # ================================================================
@@ -32,15 +32,15 @@ dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 qc <- read_excel(input_file) %>%
   mutate(
     sample_id = as.character(sample_id),
-    celltype_layer = as.character(celltype_layer)
+    sample_class = as.character(sample_class)
   ) %>%
   filter(
     !grepl("background|blank|bg", sample_id, ignore.case = TRUE),
-    !grepl("background|blank|bg", celltype_layer, ignore.case = TRUE)
+    !grepl("background|blank|bg", sample_class, ignore.case = TRUE)
   ) %>%
-  mutate(celltype_layer = factor(celltype_layer))
+  mutate(sample_class = factor(sample_class))
 
-required_cols <- c("sample_id", "celltype_layer")
+required_cols <- c("sample_id", "sample_class")
 missing_required <- setdiff(required_cols, names(qc))
 
 if (length(missing_required) > 0) {
@@ -77,21 +77,22 @@ qc <- qc %>%
 has_cols <- function(x) all(x %in% names(qc))
 
 # ================================================================
-# 4. Nature-style palette
+# 4. Sample-class palette
 # ================================================================
 
-celltype_cols <- c(
-  "microglia" = "#4C78A8",
-  "neuron_soma" = "#E45756",
-  "neuron_neuropil" = "#72B7B2"
+sample_class_cols <- c(
+  "mcherry" = "#6dcff6",
+  "neuropil" = "#fcd700",
+  "cfos" = "#faa51c",
+  "neuron" = "#42a98b"
 )
 
-missing_levels <- setdiff(levels(qc$celltype_layer), names(celltype_cols))
+missing_levels <- setdiff(levels(qc$sample_class), names(sample_class_cols))
 
 if (length(missing_levels) > 0) {
   extra_cols <- hue_pal(l = 55, c = 70)(length(missing_levels))
   names(extra_cols) <- missing_levels
-  celltype_cols <- c(celltype_cols, extra_cols)
+  sample_class_cols <- c(sample_class_cols, extra_cols)
 }
 
 neutral_cols <- c(
@@ -105,7 +106,7 @@ neutral_cols <- c(
 # 5. Theme and save helpers
 # ================================================================
 
-theme_nature_qc <- function(base_size = 7) {
+theme_qc_clean <- function(base_size = 7) {
   theme_classic(base_size = base_size) +
     theme(
       text = element_text(family = "Arial", colour = "black"),
@@ -170,7 +171,7 @@ outlier_metrics <- intersect(
 )
 
 qc_outlier_z <- qc %>%
-  group_by(celltype_layer) %>%
+  group_by(sample_class) %>%
   mutate(
     across(
       all_of(outlier_metrics),
@@ -253,15 +254,15 @@ if (length(score_components) > 0) {
 
 plot_sample_bars <- function(df, yvar, ylab) {
   df %>%
-    arrange(celltype_layer, .data[[yvar]]) %>%
+    arrange(sample_class, .data[[yvar]]) %>%
     mutate(sample_order = factor(sample_id, levels = unique(sample_id))) %>%
-    ggplot(aes(x = sample_order, y = .data[[yvar]], fill = celltype_layer)) +
+    ggplot(aes(x = sample_order, y = .data[[yvar]], fill = sample_class)) +
     geom_col(width = 0.75, colour = NA) +
-    facet_grid(. ~ celltype_layer, scales = "free_x", space = "free_x") +
-    scale_fill_manual(values = celltype_cols) +
+    facet_grid(. ~ sample_class, scales = "free_x", space = "free_x") +
+    scale_fill_manual(values = sample_class_cols) +
     scale_y_continuous(expand = expansion(mult = c(0, 0.06))) +
     labs(x = NULL, y = ylab) +
-    theme_nature_qc() +
+    theme_qc_clean() +
     theme(
       axis.text.x = element_blank(),
       axis.ticks.x = element_blank(),
@@ -271,11 +272,11 @@ plot_sample_bars <- function(df, yvar, ylab) {
 }
 
 plot_scatter_qc <- function(df, xvar, yvar, xlab, ylab, log_axes = FALSE) {
-  p <- ggplot(df, aes(x = .data[[xvar]], y = .data[[yvar]], colour = celltype_layer)) +
+  p <- ggplot(df, aes(x = .data[[xvar]], y = .data[[yvar]], colour = sample_class)) +
     geom_point(size = 1.4, alpha = 0.85) +
-    scale_colour_manual(values = celltype_cols) +
+    scale_colour_manual(values = sample_class_cols) +
     labs(x = xlab, y = ylab) +
-    theme_nature_qc() +
+    theme_qc_clean() +
     theme(aspect.ratio = 1)
 
   if (log_axes) {
@@ -288,7 +289,7 @@ plot_scatter_qc <- function(df, xvar, yvar, xlab, ylab, log_axes = FALSE) {
 }
 
 plot_box_jitter <- function(df, yvar, ylab) {
-  ggplot(df, aes(x = celltype_layer, y = .data[[yvar]], fill = celltype_layer)) +
+  ggplot(df, aes(x = sample_class, y = .data[[yvar]], fill = sample_class)) +
     geom_boxplot(
       width = 0.52,
       outlier.shape = NA,
@@ -297,15 +298,15 @@ plot_box_jitter <- function(df, yvar, ylab) {
       colour = "black"
     ) +
     geom_point(
-      aes(colour = celltype_layer),
+      aes(colour = sample_class),
       position = position_jitter(width = 0.12, height = 0),
       size = 1,
       alpha = 0.65
     ) +
-    scale_fill_manual(values = celltype_cols) +
-    scale_colour_manual(values = celltype_cols, guide = "none") +
+    scale_fill_manual(values = sample_class_cols) +
+    scale_colour_manual(values = sample_class_cols, guide = "none") +
     labs(x = NULL, y = ylab) +
-    theme_nature_qc() +
+    theme_qc_clean() +
     theme(
       axis.text.x = element_text(angle = 30, hjust = 1),
       legend.position = "none"
@@ -366,12 +367,12 @@ if ("QC.Score" %in% names(qc)) {
   p_qc_score <- qc %>%
     arrange(QC.Score) %>%
     mutate(sample_order = factor(sample_id, levels = sample_id)) %>%
-    ggplot(aes(x = sample_order, y = QC.Score, fill = celltype_layer)) +
+    ggplot(aes(x = sample_order, y = QC.Score, fill = sample_class)) +
     geom_col(width = 0.75, colour = NA) +
     geom_hline(yintercept = 0, linewidth = 0.25, linetype = "dashed", colour = neutral_cols["mid"]) +
-    scale_fill_manual(values = celltype_cols) +
+    scale_fill_manual(values = sample_class_cols) +
     labs(x = NULL, y = "Composite QC score") +
-    theme_nature_qc() +
+    theme_qc_clean() +
     theme(
       axis.text.x = element_blank(),
       axis.ticks.x = element_blank(),
@@ -404,7 +405,7 @@ pca_metrics <- intersect(
 if (length(pca_metrics) >= 3) {
 
   pca_df <- qc %>%
-    select(sample_id, celltype_layer, qc_outlier, all_of(pca_metrics)) %>%
+    select(sample_id, sample_class, qc_outlier, all_of(pca_metrics)) %>%
     drop_na(all_of(pca_metrics))
 
   if (nrow(pca_df) >= 4) {
@@ -416,10 +417,10 @@ if (length(pca_metrics) >= 3) {
     pca_res <- prcomp(pca_mat, center = TRUE, scale. = FALSE)
 
     pca_scores <- as.data.frame(pca_res$x[, 1:2]) %>%
-      bind_cols(pca_df %>% select(sample_id, celltype_layer, qc_outlier))
+      bind_cols(pca_df %>% select(sample_id, sample_class, qc_outlier))
 
     pca_centroids <- pca_scores %>%
-      group_by(celltype_layer) %>%
+      group_by(sample_class) %>%
       summarise(
         PC1 = mean(PC1, na.rm = TRUE),
         PC2 = mean(PC2, na.rm = TRUE),
@@ -428,24 +429,24 @@ if (length(pca_metrics) >= 3) {
 
     pve <- 100 * summary(pca_res)$importance[2, 1:2]
 
-    p_pca <- ggplot(pca_scores, aes(PC1, PC2, colour = celltype_layer)) +
+    p_pca <- ggplot(pca_scores, aes(PC1, PC2, colour = sample_class)) +
       geom_point(size = 1.5, alpha = 0.9) +
       geom_point(
         data = pca_centroids,
-        aes(PC1, PC2, fill = celltype_layer),
+        aes(PC1, PC2, fill = sample_class),
         shape = 23,
         size = 2.2,
         stroke = 0.3,
         colour = "black",
         inherit.aes = FALSE
       ) +
-      scale_colour_manual(values = celltype_cols) +
-      scale_fill_manual(values = celltype_cols, guide = "none") +
+      scale_colour_manual(values = sample_class_cols) +
+      scale_fill_manual(values = sample_class_cols, guide = "none") +
       labs(
         x = sprintf("PC1 (%.1f%%)", pve[1]),
         y = sprintf("PC2 (%.1f%%)", pve[2])
       ) +
-      theme_nature_qc() +
+      theme_qc_clean() +
       theme(aspect.ratio = 1)
   }
 }
@@ -490,31 +491,31 @@ if (length(qc_metrics) >= 3) {
   if ("MS1.Signal" %in% names(qc_missing)) {
     p_missing <- ggplot(
       qc_missing,
-      aes(x = MS1.Signal, y = missing_fraction_qc_metrics, colour = celltype_layer)
+      aes(x = MS1.Signal, y = missing_fraction_qc_metrics, colour = sample_class)
     ) +
       geom_point(size = 1.4, alpha = 0.85) +
       scale_x_log10(labels = label_scientific()) +
       scale_y_continuous(labels = percent_format(accuracy = 1)) +
-      scale_colour_manual(values = celltype_cols) +
+      scale_colour_manual(values = sample_class_cols) +
       labs(
         x = "MS1 signal",
         y = "Missing QC metric fraction"
       ) +
-      theme_nature_qc() +
+      theme_qc_clean() +
       theme(aspect.ratio = 1)
   } else {
     p_missing <- ggplot(
       qc_missing,
-      aes(x = sample_id, y = missing_fraction_qc_metrics, fill = celltype_layer)
+      aes(x = sample_id, y = missing_fraction_qc_metrics, fill = sample_class)
     ) +
       geom_col(width = 0.75, colour = NA) +
-      scale_fill_manual(values = celltype_cols) +
+      scale_fill_manual(values = sample_class_cols) +
       scale_y_continuous(labels = percent_format(accuracy = 1)) +
       labs(
         x = NULL,
         y = "Missing QC metric fraction"
       ) +
-      theme_nature_qc() +
+      theme_qc_clean() +
       theme(
         axis.text.x = element_blank(),
         axis.ticks.x = element_blank()
@@ -542,7 +543,7 @@ p_cv <- NULL
 if (length(cv_metrics) > 0) {
 
   cv_summary <- qc %>%
-    group_by(celltype_layer) %>%
+    group_by(sample_class) %>%
     summarise(
       across(
         all_of(cv_metrics),
@@ -557,23 +558,23 @@ if (length(cv_metrics) > 0) {
       values_to = "cv"
     )
 
-  p_cv <- ggplot(cv_summary, aes(x = metric, y = cv, fill = celltype_layer)) +
+  p_cv <- ggplot(cv_summary, aes(x = metric, y = cv, fill = sample_class)) +
     geom_col(
       position = position_dodge(width = 0.75),
       width = 0.65,
       colour = NA
     ) +
-    scale_fill_manual(values = celltype_cols) +
+    scale_fill_manual(values = sample_class_cols) +
     scale_y_continuous(labels = percent_format(accuracy = 1)) +
     labs(x = NULL, y = "Coefficient of variation") +
-    theme_nature_qc() +
+    theme_qc_clean() +
     theme(
       axis.text.x = element_text(angle = 35, hjust = 1)
     )
 }
 
 # ================================================================
-# 14. Main manuscript QC figure
+# 14. Main QC figure
 # ================================================================
 
 main_plots <- list(
@@ -597,7 +598,7 @@ qc_main <- wrap_plots(main_plots, ncol = 3, guides = "collect") +
     plot.tag = element_text(size = 9, face = "bold")
   )
 
-save_svg(qc_main, "Fig_QC_main_Nature_style_no_rings.svg", width = 18, height = 18)
+save_svg(qc_main, "qc_main.svg", width = 18, height = 18)
 
 # ================================================================
 # 15. Supplemental QC figure
@@ -667,12 +668,12 @@ if (length(supp_plots) > 0) {
       plot.tag = element_text(size = 9, face = "bold")
     )
 
-  save_svg(qc_supp, "Fig_QC_supplemental_Nature_style_no_rings.svg", width = 18, height = 14)
+  save_svg(qc_supp, "qc_supplemental.svg", width = 18, height = 14)
 }
 
 # ================================================================
 # 16. Dedicated outlier plot
-# This keeps outlier information separate from the main manuscript figure
+# This keeps outlier information separate from the main figure
 # ================================================================
 
 p_outlier <- NULL
@@ -681,7 +682,7 @@ if ("max_abs_robust_z" %in% names(qc)) {
   p_outlier <- qc %>%
     arrange(max_abs_robust_z) %>%
     mutate(sample_order = factor(sample_id, levels = sample_id)) %>%
-    ggplot(aes(x = sample_order, y = max_abs_robust_z, fill = celltype_layer)) +
+    ggplot(aes(x = sample_order, y = max_abs_robust_z, fill = sample_class)) +
     geom_col(width = 0.75, colour = NA) +
     geom_hline(
       yintercept = 3,
@@ -689,18 +690,18 @@ if ("max_abs_robust_z" %in% names(qc)) {
       linetype = "dashed",
       colour = neutral_cols["dark"]
     ) +
-    scale_fill_manual(values = celltype_cols) +
+    scale_fill_manual(values = sample_class_cols) +
     labs(
       x = NULL,
       y = "Maximum absolute robust z-score"
     ) +
-    theme_nature_qc() +
+    theme_qc_clean() +
     theme(
       axis.text.x = element_blank(),
       axis.ticks.x = element_blank()
     )
 
-  save_svg(p_outlier, "Fig_QC_outlier_summary.svg", width = 12, height = 6)
+  save_svg(p_outlier, "qc_outlier_summary.svg", width = 12, height = 6)
 }
 
 # ================================================================
@@ -730,13 +731,13 @@ if (length(pca_metrics) >= 3) {
     ) +
     coord_equal() +
     labs(x = NULL, y = NULL) +
-    theme_nature_qc() +
+    theme_qc_clean() +
     theme(
       axis.text.x = element_text(angle = 45, hjust = 1),
       legend.position = "right"
     )
 
-  save_svg(cor_plot, "Fig_QC_correlation_heatmap.svg", width = 14, height = 12)
+  save_svg(cor_plot, "qc_correlation_heatmap.svg", width = 14, height = 12)
 }
 
 # ================================================================
@@ -748,7 +749,7 @@ batch_results <- NULL
 if ("batch" %in% names(qc) && "Normalisation.Instability" %in% names(qc)) {
 
   batch_model <- lm(
-    Normalisation.Instability ~ batch + celltype_layer,
+    Normalisation.Instability ~ batch + sample_class,
     data = qc
   )
 
@@ -762,31 +763,31 @@ if ("batch" %in% names(qc) && "Normalisation.Instability" %in% names(qc)) {
     row.names = FALSE
   )
 
-  p_batch <- ggplot(qc, aes(x = factor(batch), y = Normalisation.Instability, fill = celltype_layer)) +
+  p_batch <- ggplot(qc, aes(x = factor(batch), y = Normalisation.Instability, fill = sample_class)) +
     geom_boxplot(width = 0.55, outlier.shape = NA, linewidth = 0.35, alpha = 0.75) +
     geom_point(
-      aes(colour = celltype_layer),
+      aes(colour = sample_class),
       position = position_jitterdodge(jitter.width = 0.12, dodge.width = 0.65),
       size = 1,
       alpha = 0.65
     ) +
-    scale_fill_manual(values = celltype_cols) +
-    scale_colour_manual(values = celltype_cols, guide = "none") +
+    scale_fill_manual(values = sample_class_cols) +
+    scale_colour_manual(values = sample_class_cols, guide = "none") +
     labs(
       x = "Batch",
       y = "Normalisation instability"
     ) +
-    theme_nature_qc()
+    theme_qc_clean()
 
-  save_svg(p_batch, "Fig_QC_batch_normalisation_instability.svg", width = 10, height = 7)
+  save_svg(p_batch, "qc_batch_normalisation_instability.svg", width = 10, height = 7)
 }
 
 # ================================================================
 # 19. Summary tables
 # ================================================================
 
-qc_summary_by_celltype <- qc %>%
-  group_by(celltype_layer) %>%
+qc_summary_by_sample_class <- qc %>%
+  group_by(sample_class) %>%
   summarise(
     n = n(),
     n_outliers = sum(qc_outlier, na.rm = TRUE),
@@ -809,7 +810,7 @@ qc_summary_by_celltype <- qc %>%
 qc_outliers <- qc_outlier_z %>%
   select(
     sample_id,
-    celltype_layer,
+    sample_class,
     n_outlier_metrics,
     max_abs_robust_z,
     qc_outlier,
@@ -818,8 +819,8 @@ qc_outliers <- qc_outlier_z %>%
   arrange(desc(qc_outlier), desc(max_abs_robust_z))
 
 write.csv(
-  qc_summary_by_celltype,
-  file = file.path(out_dir, "qc_summary_by_celltype_layer.csv"),
+  qc_summary_by_sample_class,
+  file = file.path(out_dir, "qc_summary_by_sample_class.csv"),
   row.names = FALSE
 )
 
@@ -838,7 +839,7 @@ if (!is.null(cv_summary)) {
 }
 
 xlsx_list <- list(
-  summary_by_celltype = qc_summary_by_celltype,
+  summary_by_sample_class = qc_summary_by_sample_class,
   robust_outliers = qc_outliers
 )
 
@@ -860,25 +861,26 @@ openxlsx::write.xlsx(
 # 20. Console output
 # ================================================================
 
-cat("\nQC manuscript figures saved to:\n")
+cat("\nQC figures saved to:\n")
 cat(out_dir, "\n\n")
 
 cat("Main figure:\n")
-cat(" - Fig_QC_main_Nature_style_no_rings.svg\n\n")
+cat(" - qc_main.svg\n\n")
 
 cat("Supplemental figure:\n")
-cat(" - Fig_QC_supplemental_Nature_style_no_rings.svg\n\n")
+cat(" - qc_supplemental.svg\n\n")
 
 cat("Dedicated outlier figure:\n")
-cat(" - Fig_QC_outlier_summary.svg\n\n")
+cat(" - qc_outlier_summary.svg\n\n")
 
 cat("Tables:\n")
 cat(" - qc_summary_tables.xlsx\n")
-cat(" - qc_summary_by_celltype_layer.csv\n")
+cat(" - qc_summary_by_sample_class.csv\n")
 cat(" - qc_robust_outlier_table.csv\n\n")
 
 cat("Outlier rule:\n")
-cat(" - Sample flagged if >=2 QC metrics have absolute robust z-score > 3 within celltype_layer.\n")
+cat(" - Sample flagged if >=2 QC metrics have absolute robust z-score > 3 within sample_class.\n")
 cat(" - Outliers are not overlaid on the main figure to avoid visual clutter.\n\n")
 
 print(qc_main)
+

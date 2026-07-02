@@ -194,9 +194,9 @@ read_config <- function(config_path) {
       config_file = config_path
     ),
     paths = list(
-      mapped_dir = "S:\Lab_Member\Tobi\Experiments\Collabs\Neha\clusterProfiler\Datasets\mapped\learning_signature\memory_ensemble",
-      working_base = "S:\Lab_Member\Tobi\Experiments\Collabs\Neha\clusterProfiler",
-      mapped_data_base = "S:\Lab_Member\Tobi\Experiments\Collabs\Neha\clusterProfiler\Datasets\mapped\learning_signature\memory_ensemble",
+      mapped_dir = "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Datasets/mapped/learning_signature/memory_ensemble",
+      working_base = "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler",
+      mapped_data_base = "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Datasets/mapped/learning_signature/memory_ensemble",
       background_universe_file = ""
     ),
     optional_inputs = list(
@@ -356,14 +356,14 @@ load_background_universe <- function(cfg) {
   as.character(universe)
 }
 
-parse_sample_token <- function(token, phenotypes = c("sus", "con")) {
-  phenotype <- ""
+parse_sample_token <- function(token, conditions = c("paired_cno", "paired_veh", "unpaired_cno", "unpaired_veh")) {
+  condition <- ""
   unit <- token
 
-  for (ph in phenotypes) {
-    if (grepl(paste0(ph, "$"), token, ignore.case = TRUE)) {
-      phenotype <- tolower(ph)
-      unit <- sub(paste0(ph, "$"), "", token, ignore.case = TRUE)
+  for (cond in conditions) {
+    if (grepl(paste0("_?", cond, "$"), token, ignore.case = TRUE)) {
+      condition <- tolower(cond)
+      unit <- sub(paste0("_?", cond, "$"), "", token, ignore.case = TRUE)
       break
     }
   }
@@ -378,11 +378,11 @@ parse_sample_token <- function(token, phenotypes = c("sus", "con")) {
     }
   }
 
-  list(raw = token, unit = unit, pretty_unit = pretty_unit, phenotype = phenotype)
+  list(raw = token, unit = unit, pretty_unit = pretty_unit, condition = condition)
 }
 
 classify_comparison_route <- function(comparison_name) {
-  parts <- strsplit(comparison_name, "_", fixed = TRUE)[[1]]
+  parts <- strsplit(comparison_name, "_vs_", fixed = TRUE)[[1]]
   if (length(parts) < 2) {
     return(list(category = "unclassified", unit_folder = "unknown_unit"))
   }
@@ -391,16 +391,16 @@ classify_comparison_route <- function(comparison_name) {
   b <- parse_sample_token(parts[2])
 
   same_unit <- nzchar(a$unit) && nzchar(b$unit) && identical(a$unit, b$unit)
-  same_pheno <- nzchar(a$phenotype) && nzchar(b$phenotype) && identical(a$phenotype, b$phenotype)
+  same_condition <- nzchar(a$condition) && nzchar(b$condition) && identical(a$condition, b$condition)
 
-  category <- if (same_unit && !same_pheno) {
-    "phenotype_within_unit"
-  } else if (!same_unit && same_pheno) {
-    "phenotype_between_unit"
-  } else if (same_unit && same_pheno) {
-    "within_unit_same_phenotype"
-  } else if (!same_unit && !same_pheno) {
-    "between_unit_and_phenotype"
+  category <- if (same_unit && !same_condition) {
+    "condition_within_unit"
+  } else if (!same_unit && same_condition) {
+    "condition_between_unit"
+  } else if (same_unit && same_condition) {
+    "within_unit_same_condition"
+  } else if (!same_unit && !same_condition) {
+    "between_unit_and_condition"
   } else {
     "unclassified"
   }
@@ -792,7 +792,7 @@ analyze_comparison <- function(cell_types, working_base, mapped_data_base, organ
       tryCatch({
         top_terms <- head(gse_for_plot@result$Description, 3)
         pmcplot_gse <- pmcplot(top_terms, 2010:2025, proportion = FALSE) + 
-          labs(title = paste("Publication Trends -", ont, plot_label))
+          labs(title = paste("Summary trends -", ont, plot_label))
         save_plot_organized(pmcplot_gse, paste0("GSEA_", ont, "_pubmed", plot_suffix, ".svg"), dirs$plots_go)
       }, error=function(e) NULL)
     }
@@ -1298,3 +1298,4 @@ summary_lines <- c(
 )
 writeLines(summary_lines, con = summary_txt)
 write_log_line(master_log, "INFO", "GLOBAL", "SUMMARY", paste0("Run summary written: ", run_summary_file))
+
