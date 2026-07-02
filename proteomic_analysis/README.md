@@ -42,7 +42,7 @@ cd Neha/proteomic_analysis
 
 For the lightweight demo and terminology checks, base R is sufficient.
 
-For full analysis scripts, install the packages used by the target script. Common CRAN packages include:
+For full analysis scripts, install the packages used by the target script. See `requirements_R.md` for tested R and package versions. Common CRAN packages include:
 
 - `dplyr`
 - `tidyr`

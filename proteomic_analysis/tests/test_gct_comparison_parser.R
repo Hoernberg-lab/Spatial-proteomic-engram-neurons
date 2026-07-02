@@ -1,4 +1,12 @@
-source(file.path("R", "analysis_labels.R"))
+args <- commandArgs(trailingOnly = FALSE)
+file_arg <- grep("^--file=", args, value = TRUE)
+script_path <- if (length(file_arg) == 1) sub("^--file=", "", file_arg) else file.path("tests", "test_gct_comparison_parser.R")
+repo_root <- normalizePath(file.path(dirname(script_path), ".."), winslash = "/", mustWork = FALSE)
+if (!file.exists(file.path(repo_root, "R", "analysis_labels.R"))) {
+  repo_root <- normalizePath(getwd(), winslash = "/", mustWork = TRUE)
+}
+
+source(file.path(repo_root, "R", "analysis_labels.R"))
 
 cases <- c(
   "neuron_3.over.neuron_2" = "neuron_unpaired_cno_vs_neuron_paired_veh",
