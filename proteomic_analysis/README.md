@@ -1,4 +1,4 @@
-# Neha Proteomics Analysis Workflow
+# Spatial Proteomics Analysis Workflow
 
 ## Overview
 
