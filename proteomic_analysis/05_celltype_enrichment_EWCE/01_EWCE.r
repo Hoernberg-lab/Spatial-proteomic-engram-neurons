@@ -12,6 +12,7 @@
 
 options(repos = c(CRAN = "https://cloud.r-project.org"))
 set.seed(42)
+source(file.path("R", "analysis_labels.R"))
 
 if (!require("BiocManager", quietly = TRUE)) install.packages("BiocManager")
 
@@ -60,10 +61,10 @@ analysis_params <- list(
   primary_top_n = 250,
   fdr_alpha = 0.05,
   marker_top_n = 200,
-  sample_class = c("mcherry", "neuropil", "cfos", "neuron"),
-  conditions = c("paired_cno", "paired_veh", "unpaired_cno", "unpaired_veh"),
-  reference_condition = "paired_veh",
-  expgroup_condition_map = c("1" = "paired_cno", "2" = "paired_veh", "3" = "unpaired_cno", "4" = "unpaired_veh")
+  sample_class = sample_classes,
+  conditions = condition_levels,
+  reference_condition = reference_condition,
+  expgroup_condition_map = condition_code_map
 )
 
 dirs <- list(
@@ -160,18 +161,6 @@ normalize_sample_id <- function(x) {
     as.character() %>%
     stringr::str_replace_all("\\\\", "/") %>%
     stringr::str_trim()
-}
-
-normalize_condition <- function(x) {
-  x <- stringr::str_to_lower(as.character(x))
-  x <- stringr::str_replace_all(x, "-", "_")
-  mapped <- unname(analysis_params$expgroup_condition_map[x])
-  dplyr::if_else(!is.na(mapped), mapped, x)
-}
-
-normalize_sample_class <- function(x) {
-  x <- stringr::str_to_lower(as.character(x))
-  dplyr::if_else(x %in% analysis_params$sample_class, x, NA_character_)
 }
 
 resolve_metadata_file <- function(metadata_path) {

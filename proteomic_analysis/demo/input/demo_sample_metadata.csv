@@ -1,0 +1,5 @@
+sample_id,sample_class,condition_code,condition
+demo_mcherry_1,mcherry,1,paired_cno
+demo_mcherry_2,mcherry,2,paired_veh
+demo_neuropil_1,neuropil,1,paired_cno
+demo_neuropil_2,neuropil,2,paired_veh

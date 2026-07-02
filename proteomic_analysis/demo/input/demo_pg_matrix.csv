@@ -1,0 +1,3 @@
+Genes,demo_mcherry_1,demo_mcherry_2,demo_neuropil_1,demo_neuropil_2,logFC.mcherry_1.over.mcherry_2,Log.P.Value.CA1_so_neuropil_1.over.CA1_so_neuropil_2
+GeneA,10,8,5,4,2,1.3
+GeneB,6,7,3,3.5,-1,0.2

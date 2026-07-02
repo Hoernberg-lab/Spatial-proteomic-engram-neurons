@@ -45,20 +45,6 @@ safe_name <- function(x) {
     stringr::str_replace_all("_+", "_")
 }
 
-format_side <- function(unit, sample_class, condition_code) {
-  condition <- labels$condition_code_map[[condition_code]]
-  if (is.null(condition) || is.na(condition)) condition <- condition_code
-  paste(unit, sample_class, condition, sep = "_")
-}
-
-format_comparison <- function(case_unit, case_class, case_code, ref_unit, ref_class, ref_code) {
-  paste0(
-    format_side(case_unit, case_class, case_code),
-    "_vs_",
-    format_side(ref_unit, ref_class, ref_code)
-  )
-}
-
 swap_comparison <- function(comp_key) {
   parts <- stringr::str_split(comp_key, "\\.over\\.", simplify = TRUE)
 
@@ -83,31 +69,23 @@ split_col <- function(col) {
   )
 }
 
-parse_compkey <- function(key) {
-  m <- stringr::str_match(
-    key,
-    "^([A-Za-z0-9]+)_([a-z]+)_([1234])\\.over\\.([A-Za-z0-9]+)_([a-z]+)_([1234])$"
-  )
-
-  if (!is.na(m[1, 1])) {
-    r1 <- m[1, 2]
-    g1 <- m[1, 3]
-    l1 <- m[1, 4]
-
-    r2 <- m[1, 5]
-    g2 <- m[1, 6]
-    l2 <- m[1, 7]
-
-    return(format_comparison(r1, g1, l1, r2, g2, l2))
+parse_compkey <- function(key, warn = TRUE) {
+  parsed <- parse_comparison_key(key)
+  if (!is.null(parsed)) {
+    return(parsed$name)
   }
 
-  key2 <- stringr::str_replace_all(key, "\\.over\\.", "_")
-  for (code in names(labels$condition_code_map)) {
-    key2 <- stringr::str_replace_all(key2, paste0("_", code, "(?=($|_))"), paste0("_", labels$condition_code_map[[code]]))
+  if (isTRUE(warn)) {
+    warning(
+      "Could not parse comparison key '", key,
+      "'. Expected '<sample_class_or_alias>_<condition_code>.over.<sample_class_or_alias>_<condition_code>' ",
+      "or '<analysis_unit>_<sample_class_or_alias>_<condition_code>.over.<analysis_unit>_<sample_class_or_alias>_<condition_code>'. ",
+      "Using original safe name.",
+      call. = FALSE
+    )
   }
-  key2 <- stringr::str_replace_all(key2, "[^A-Za-z0-9_]", "")
 
-  key2
+  safe_name(key)
 }
 
 # -------------------------------
@@ -299,29 +277,7 @@ written_index <- purrr::imap_dfr(by_comparison, function(cols, comp_key) {
       df_rev[[col]] <- suppressWarnings(as.numeric(df_rev[[col]]) * -1)
     }
 
-    m <- stringr::str_match(
-      comp_key,
-      "^([A-Za-z0-9]+)_([a-z]+)_([1234])\\.over\\.([A-Za-z0-9]+)_([a-z]+)_([1234])$"
-    )
-
-    if (!is.na(m[1, 1])) {
-      r1 <- m[1, 2]
-      g1 <- m[1, 3]
-      l1 <- m[1, 4]
-
-      r2 <- m[1, 5]
-      g2 <- m[1, 6]
-      l2 <- m[1, 7]
-
-      rev_comp <- format_comparison(r2, g2, l2, r1, g1, l1)
-
-    } else {
-      rev_comp <- swap_comparison(comp_key)
-      for (code in names(labels$condition_code_map)) {
-        rev_comp <- stringr::str_replace_all(rev_comp, paste0("_", code, "(?=($|_|\\.))"), paste0("_", labels$condition_code_map[[code]]))
-      }
-      rev_comp <- stringr::str_replace_all(rev_comp, "[^A-Za-z0-9_]", "")
-    }
+    rev_comp <- parse_compkey(swap_comparison(comp_key))
 
     rev_file <- file.path(
       outdir_rev,

@@ -1,0 +1,3 @@
+metric,comparison,canonical_comparison
+logFC,mcherry_1.over.mcherry_2,mcherry_paired_cno_vs_mcherry_paired_veh
+Log.P.Value,CA1_so_neuropil_1.over.CA1_so_neuropil_2,CA1_so_neuropil_paired_cno_vs_CA1_so_neuropil_paired_veh

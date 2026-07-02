@@ -5,17 +5,68 @@ library(tools)
 source(file.path("R", "analysis_labels.R"))
 
 # ---- CONFIGURATION ----
-# Set mode: "excel" for sheets in one Excel file, "folder" for all Excel files in a folder
-mode <- "folder" # or "folder"
+option_or_env <- function(option_name, env_name, default) {
+    opt <- getOption(option_name)
+    if (!is.null(opt) && nzchar(as.character(opt))) {
+        return(as.character(opt))
+    }
+    env <- Sys.getenv(env_name, unset = "")
+    if (nzchar(env)) {
+        return(env)
+    }
+    default
+}
 
-# Define file paths
-file_path <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Datasets/gct/data/pg.matrix_filtered_pcaAdjusted_unnormalized.xlsx"
-folder_path <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Datasets/gct/data/imputed/grouped"
-metadata_path <- ""
-output_dir <- "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Datasets/gct/data/morpheus"
+read_table_auto <- function(path, sheet = NULL) {
+    if (is.null(path) || !nzchar(path) || !file.exists(path)) {
+        stop("Input file is unavailable: ", path, call. = FALSE)
+    }
+    if (grepl("\\.csv$", path, ignore.case = TRUE)) {
+        return(read.csv(path, check.names = FALSE, stringsAsFactors = FALSE))
+    }
+    if (is.null(sheet)) {
+        readxl::read_excel(path)
+    } else {
+        readxl::read_excel(path, sheet = sheet)
+    }
+}
+
+# Set with R options or environment variables for the full analysis.
+mode <- option_or_env("neha.excel_convert_mode", "NEHA_EXCEL_CONVERT_MODE", "excel")
+file_path <- option_or_env(
+    "neha.excel_convert_file",
+    "NEHA_EXCEL_CONVERT_FILE",
+    file.path("demo", "input", "demo_pg_matrix.csv")
+)
+folder_path <- option_or_env(
+    "neha.excel_convert_folder",
+    "NEHA_EXCEL_CONVERT_FOLDER",
+    "S:/Lab_Member/Tobi/Experiments/Collabs/Neha/clusterProfiler/Datasets/gct/data/imputed/grouped"
+)
+metadata_path <- option_or_env(
+    "neha.metadata_path",
+    "NEHA_METADATA_PATH",
+    file.path("demo", "input", "demo_sample_metadata.csv")
+)
+output_dir <- option_or_env(
+    "neha.excel_convert_output",
+    "NEHA_EXCEL_CONVERT_OUTPUT",
+    file.path("demo", "output", "excel_convert")
+)
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 
 # Read metadata
-metadata <- read_excel(metadata_path)
+if (!nzchar(metadata_path) || !file.exists(metadata_path)) {
+    stop(
+        "Metadata file is required. Set option 'neha.metadata_path' or env var NEHA_METADATA_PATH. ",
+        "Default checked: ", metadata_path,
+        call. = FALSE
+    )
+}
+metadata <- read_table_auto(metadata_path)
+if (!"sample_id" %in% names(metadata)) {
+    stop("Metadata must contain a sample_id column: ", metadata_path, call. = FALSE)
+}
 if (!"sample_class" %in% names(metadata)) {
     metadata$sample_class <- parse_sample_class(metadata$sample_id)
 }
@@ -28,19 +79,26 @@ metadata$condition <- normalize_condition(metadata$condition_code)
 # ---- READ DATA FILES ----
 sheet_dfs <- list()
 if (mode == "excel") {
-    # Read all sheets from one Excel file
-    sheet_names <- excel_sheets(file_path)
-    sheet_dfs <- setNames(
-        lapply(sheet_names, function(sheet) read_excel(file_path, sheet = sheet)),
-        sheet_names
-    )
+    if (grepl("\\.csv$", file_path, ignore.case = TRUE)) {
+        sheet_dfs <- setNames(list(read_table_auto(file_path)), basename(file_path_sans_ext(file_path)))
+    } else {
+        sheet_names <- excel_sheets(file_path)
+        sheet_dfs <- setNames(
+            lapply(sheet_names, function(sheet) read_table_auto(file_path, sheet = sheet)),
+            sheet_names
+        )
+    }
 } else if (mode == "folder") {
-    # Read all Excel files in folder (ignore sheets, use file name as key)
-    excel_files <- list.files(folder_path, pattern = "\\.xlsx$", full.names = TRUE)
+    excel_files <- list.files(folder_path, pattern = "\\.(xlsx|csv)$", full.names = TRUE, ignore.case = TRUE)
+    if (length(excel_files) == 0) {
+        stop("No .xlsx or .csv files found in folder_path: ", folder_path, call. = FALSE)
+    }
     sheet_dfs <- setNames(
-        lapply(excel_files, function(f) read_excel(f)),
+        lapply(excel_files, read_table_auto),
         basename(file_path_sans_ext(excel_files))
     )
+} else {
+    stop("mode must be 'excel' or 'folder', got: ", mode, call. = FALSE)
 }
 
 # ---- PROCESS EACH DATA FRAME ----

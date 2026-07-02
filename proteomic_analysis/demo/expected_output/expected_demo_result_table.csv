@@ -1,0 +1,5 @@
+sample_id,sample_class,condition_code,condition,mean_intensity
+demo_mcherry_1,mcherry,1,paired_cno,8
+demo_mcherry_2,mcherry,2,paired_veh,7.5
+demo_neuropil_1,neuropil,1,paired_cno,4
+demo_neuropil_2,neuropil,2,paired_veh,3.75
