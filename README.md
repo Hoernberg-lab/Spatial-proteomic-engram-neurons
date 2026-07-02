@@ -2,7 +2,7 @@
 
 ## Overview
 
-This folder contains the Neha proteomics workflow for preprocessing, quality control, differential analysis, and EWCE enrichment against external reference cell types.
+This folder contains the spatial engram proteomics workflow for preprocessing, quality control, differential analysis, and EWCE enrichment against external reference cell types.
 
 Shared label definitions live in `R/analysis_labels.R`.
 
